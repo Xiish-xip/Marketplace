@@ -4,7 +4,7 @@ import { ShoppingCart, Minus, Plus, Trash2, ArrowRight, Tag } from 'lucide-react
 import { useCart, useUpdateCartItem, useRemoveFromCart } from '../../lib/query-hooks';
 import { assetUrl } from '../../lib/assets';
 import EmptyState from '../shared/EmptyState';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 
 export default function CartPage() {
   const { data, isLoading } = useCart();
@@ -15,7 +15,7 @@ export default function CartPage() {
   const cart = data?.data;
   const items = cart?.items || [];
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
 
   if (!items.length) {
     return (

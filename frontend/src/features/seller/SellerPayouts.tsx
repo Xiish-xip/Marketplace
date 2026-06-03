@@ -3,7 +3,7 @@ import { Wallet, Plus, X, DollarSign } from 'lucide-react';
 import { get, post } from '../../lib/api-enhanced';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import DataTable from '../shared/DataTable';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import toast from 'react-hot-toast';
 
 export default function SellerPayouts() {
@@ -20,7 +20,7 @@ export default function SellerPayouts() {
     onError: (err: any) => toast.error(err.response?.data?.message || 'Request failed'),
   });
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
 
   return (
     <div>

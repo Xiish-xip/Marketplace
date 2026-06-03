@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Bot, X, Send, Loader2, MessageSquarePlus, User, Copy, Check, RotateCcw, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Bot, X, Send, Loader2, MessageSquarePlus, User, Copy, Check, RotateCcw, ThumbsUp, ThumbsDown, AlertTriangle, Ban } from 'lucide-react';
 import { useChatStore, ChatConversation, ChatMessage } from '../../lib/chat-store';
 import { useAuthStore } from '../../lib/auth-store';
+import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import toast from 'react-hot-toast';
@@ -123,7 +124,7 @@ function MessageActions({ content, onRegenerate }: { content: string; onRegenera
   );
 }
 
-export default function ChatBubble() {
+export default function ChatBubble({ hideTrigger = false }: { hideTrigger?: boolean } = {}) {
   const { isAuthenticated } = useAuthStore();
   const [isOpen, setIsOpen] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
@@ -132,7 +133,7 @@ export default function ChatBubble() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
 
-  const {
+   const {
     conversations,
     currentConversationId,
     messages,
@@ -142,11 +143,15 @@ export default function ChatBubble() {
     typingText,
     thinkingText,
     streamingMessageId,
+    pendingAction,
     loadConversations,
     createConversation,
     selectConversation,
     sendMessageStream,
     deleteConversation,
+    approvePendingAction,
+    denyPendingAction,
+    setPendingAction,
   } = useChatStore();
 
   const isTyping = isLoading || !!typingText;
@@ -156,6 +161,21 @@ export default function ChatBubble() {
       loadConversations();
     }
   }, [isOpen, loadConversations]);
+
+  // Listen for floating actions events to open/close/toggle chat
+  useEffect(() => {
+    function handleOpen() { setIsOpen(true); }
+    function handleClose() { setIsOpen(false); }
+    function handleToggle() { setIsOpen((v) => !v); }
+    window.addEventListener('floating:open-chat', handleOpen);
+    window.addEventListener('floating:close-chat', handleClose);
+    window.addEventListener('floating:toggle-chat', handleToggle);
+    return () => {
+      window.removeEventListener('floating:open-chat', handleOpen);
+      window.removeEventListener('floating:close-chat', handleClose);
+      window.removeEventListener('floating:toggle-chat', handleToggle);
+    };
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -224,27 +244,28 @@ export default function ChatBubble() {
   }, [handleSend]);
 
   const currentConv = conversations.find((c: ChatConversation) => c.id === currentConversationId);
-
-  if (!isAuthenticated) return null;
+  const isGuest = !isAuthenticated;
 
   return (
     <>
       {/* Floating Button */}
-      <button
-        data-chatbubble-trigger
-        onClick={() => setIsOpen(!isOpen)}
-        className={`fixed bottom-4 right-4 z-[9999] flex items-center justify-center w-12 h-12 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 text-white ${
-          isOpen ? 'rotate-90 scale-110' : 'hover:scale-105'
-        }`}
-        style={{
-          backgroundColor: isOpen ? 'rgb(var(--color-danger))' : 'rgb(var(--color-primary-600))',
-        }}
-        aria-label={isOpen ? 'Close chat' : 'Open AI assistant'}
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-      >
-        {isOpen ? <X className="w-5 h-5" aria-hidden="true" /> : <Bot className="w-5 h-5" aria-hidden="true" />}
-      </button>
+      {!hideTrigger && (
+        <button
+          data-chatbubble-trigger
+          onClick={() => setIsOpen(!isOpen)}
+          className={`fixed bottom-4 right-4 z-[9999] flex items-center justify-center w-12 h-12 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 text-white ${
+            isOpen ? 'rotate-90 scale-110' : 'hover:scale-105'
+          }`}
+          style={{
+            backgroundColor: isOpen ? 'rgb(var(--color-danger))' : 'rgb(var(--color-primary-600))',
+          }}
+          aria-label={isOpen ? 'Close chat' : 'Open AI assistant'}
+          aria-expanded={isOpen}
+          aria-haspopup="dialog"
+        >
+          {isOpen ? <X className="w-5 h-5" aria-hidden="true" /> : <Bot className="w-5 h-5" aria-hidden="true" />}
+        </button>
+      )}
 
       {/* Unread indicator dot */}
       {!isOpen && conversations.length > 0 && (
@@ -369,7 +390,35 @@ export default function ChatBubble() {
           {/* Main chat area */}
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex-1 overflow-y-auto px-2.5 py-2 space-y-2">
-              {!currentConversationId ? (
+              {isGuest ? (
+                <div className="h-full flex flex-col items-center justify-center text-center px-4">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center mb-3 shadow" style={{ background: 'linear-gradient(135deg, rgb(var(--color-primary-100)), rgb(var(--color-primary-200)))' }}>
+                    <Bot className="w-5 h-5" style={{ color: 'rgb(var(--color-primary-600))' }} aria-hidden="true" />
+                  </div>
+                  <h4 className="text-xs font-bold mb-2" style={{ color: 'rgb(var(--color-text))' }}>AI chat requires sign in</h4>
+                  <p className="text-[10px] mb-4" style={{ color: 'rgb(var(--color-text-muted))' }}>
+                    Please log in to start chatting with the assistant and access your saved conversations.
+                  </p>
+                  <div className="flex flex-col gap-2 w-full max-w-[220px]">
+                    <Link
+                      to="/login"
+                      className="w-full px-3 py-2 rounded-full text-[10px] font-semibold text-white"
+                      style={{ backgroundColor: 'rgb(var(--color-primary-600))' }}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Sign in
+                    </Link>
+                    <Link
+                      to="/register"
+                      className="w-full px-3 py-2 rounded-full text-[10px] font-semibold"
+                      style={{ backgroundColor: 'rgb(var(--color-surface))', border: '1px solid rgb(var(--color-border))', color: 'rgb(var(--color-text-secondary))' }}
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Create account
+                    </Link>
+                  </div>
+                </div>
+              ) : !currentConversationId ? (
                 <div className="h-full flex flex-col items-center justify-center text-center px-2">
                   <div className="w-10 h-10 rounded-full flex items-center justify-center mb-2 shadow" style={{ background: 'linear-gradient(135deg, rgb(var(--color-primary-100)), rgb(var(--color-primary-200)))' }}>
                     <Bot className="w-5 h-5" style={{ color: 'rgb(var(--color-primary-600))' }} aria-hidden="true" />
@@ -454,34 +503,134 @@ export default function ChatBubble() {
               )}
             </div>
 
-            {/* Input Area */}
-            <div className="p-2 shrink-0" style={{ borderTop: '1px solid', borderColor: 'rgb(var(--color-border))', backgroundColor: 'rgb(var(--color-surface))' }}>
-              <form onSubmit={handleSend} className="flex items-center gap-1.5">
-                <VoiceControl autoSend={true} onVoiceInput={(text) => setInput(prev => prev ? prev + ' ' + text : text)} onAutoSend={async (text) => {
-                  setInput('');
-                  if (!currentConversationId) {
-                    try { await createConversation('New Conversation'); setTimeout(async () => { try { await sendMessageStream(text); } catch (err: any) { toast.error(err.message || 'Failed to send'); } }, 200); return; }
-                    catch (err: any) { toast.error(err.message || 'Failed to create conversation'); return; }
-                  }
-                  try { await sendMessageStream(text); } catch (err: any) { toast.error(err.message || 'Failed to send'); }
-                }} enabled={true} />
-                <div className="relative flex-1">
-                  <textarea ref={textareaRef} value={input} onChange={e => { setInput(e.target.value); if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`; }}}
-                    onKeyDown={handleKeyDown} placeholder="Message or use voice..." rows={1} className="w-full resize-none px-3 py-2 pr-10 min-h-[36px] max-h-24 text-[11px] rounded-lg focus:outline-none" disabled={isLoading} aria-label="Type your message"
-                    style={{ backgroundColor: 'rgb(var(--color-surface-muted))', color: 'rgb(var(--color-text))', border: '1px solid rgb(var(--color-border))' }} />
-                  <button type="submit" disabled={!input.trim() || isLoading} className="absolute right-2 bottom-2 p-1 rounded-lg transition-colors text-white"
-                    style={{ backgroundColor: 'rgb(var(--color-primary-600))', opacity: (!input.trim() || isLoading) ? 0.4 : 1 }}
-                    onMouseEnter={(e) => { if (input.trim() && !isLoading) e.currentTarget.style.backgroundColor = 'rgb(var(--color-primary-700))'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgb(var(--color-primary-600))'; }}
-                    aria-label="Send message">
-                    <Send className="w-3 h-3" aria-hidden="true" />
+          {/* ── Admin Approval Confirmation Card ── */}
+          {pendingAction && (
+            <div className="px-2.5 pb-2">
+              <div
+                className="rounded-lg p-2.5 border-l-4 animate-fade-in"
+                style={{
+                  backgroundColor: 'rgb(var(--color-warning) / 0.08)',
+                  borderColor: 'rgb(var(--color-warning))',
+                  borderLeftWidth: '4px',
+                }}
+                role="alert"
+                aria-label="Pending admin action"
+              >
+                <div className="flex items-start gap-2 mb-1.5">
+                  <div
+                    className="shrink-0 mt-0.5 w-5 h-5 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: 'rgb(var(--color-warning) / 0.2)' }}
+                  >
+                    <AlertTriangle className="w-3 h-3" style={{ color: 'rgb(var(--color-warning))' }} aria-hidden="true" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-semibold leading-snug" style={{ color: 'rgb(var(--color-text))' }}>
+                      Approval required
+                    </p>
+                    <p className="text-[10px] mt-0.5 font-medium capitalize" style={{ color: 'rgb(var(--color-text-secondary))' }}>
+                      {pendingAction.toolLabel}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setPendingAction(null)}
+                    className="shrink-0 p-0.5 rounded hover:bg-black/10 transition-colors"
+                    aria-label="Dismiss approval request"
+                    style={{ color: 'rgb(var(--color-text-muted))' }}
+                  >
+                    <X className="w-3 h-3" aria-hidden="true" />
                   </button>
                 </div>
-              </form>
-              <p className="text-[9px] mt-1 text-center" style={{ color: 'rgb(var(--color-text-disabled))' }}>
-                Enter to send · Shift+Enter for new line · Voice supported
-              </p>
+
+                <div
+                  className="text-[9.5px] mb-2 p-2 rounded-md overflow-x-auto"
+                  style={{
+                    backgroundColor: 'rgb(var(--color-surface-muted))',
+                    color: 'rgb(var(--color-text-secondary))',
+                    border: '1px solid rgb(var(--color-border))',
+                    fontFamily: 'monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {pendingAction.summary}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={approvePendingAction}
+                    disabled={isLoading}
+                    className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-semibold text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ backgroundColor: 'rgb(var(--color-accent-600))' }}
+                    onMouseEnter={(e) => { if (!isLoading) (e.currentTarget.style.backgroundColor = 'rgb(var(--color-accent-700))'); }}
+                    onMouseLeave={(e) => { (e.currentTarget.style.backgroundColor = 'rgb(var(--color-accent-600))'); }}
+                    aria-label="Approve action"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Check className="w-3 h-3" aria-hidden="true" />
+                    )}
+                    Approve
+                  </button>
+                  <button
+                    onClick={denyPendingAction}
+                    disabled={isLoading}
+                    className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-md text-[10px] font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: 'rgb(var(--color-danger))',
+                      border: '1px solid rgb(var(--color-danger))',
+                    }}
+                    onMouseEnter={(e) => { if (!isLoading) (e.currentTarget.style.backgroundColor = 'rgb(var(--color-danger))', e.currentTarget.style.color = 'white'); }}
+                    onMouseLeave={(e) => { (e.currentTarget.style.backgroundColor = 'transparent', e.currentTarget.style.color = 'rgb(var(--color-danger))'); }}
+                    aria-label="Deny action"
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-3 h-3 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Ban className="w-3 h-3" aria-hidden="true" />
+                    )}
+                    Deny
+                  </button>
+                </div>
+
+                <p className="text-[8.5px] mt-1.5 text-center" style={{ color: 'rgb(var(--color-text-disabled))' }}>
+                  {pendingAction.toolLabel} — the AI suggested this change. Confirm before it's applied.
+                </p>
+              </div>
             </div>
+          )}
+
+          {/* Input Area */}
+          {!isGuest && (
+            <div className="p-2 shrink-0" style={{ borderTop: '1px solid', borderColor: 'rgb(var(--color-border))', backgroundColor: 'rgb(var(--color-surface))' }}>
+                <form onSubmit={handleSend} className="flex items-center gap-1.5">
+                  <VoiceControl autoSend={true} onVoiceInput={(text) => setInput(prev => prev ? prev + ' ' + text : text)} onAutoSend={async (text) => {
+                    setInput('');
+                    if (!currentConversationId) {
+                      try { await createConversation('New Conversation'); setTimeout(async () => { try { await sendMessageStream(text); } catch (err: any) { toast.error(err.message || 'Failed to send'); } }, 200); return; }
+                      catch (err: any) { toast.error(err.message || 'Failed to create conversation'); return; }
+                    }
+                    try { await sendMessageStream(text); } catch (err: any) { toast.error(err.message || 'Failed to send'); }
+                  }} enabled={true} />
+                  <div className="relative flex-1">
+                    <textarea ref={textareaRef} value={input} onChange={e => { setInput(e.target.value); if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`; }}}
+                      onKeyDown={handleKeyDown} placeholder="Message or use voice..." rows={1} className="w-full resize-none px-3 py-2 pr-10 min-h-[36px] max-h-24 text-[11px] rounded-lg focus:outline-none" disabled={isLoading} aria-label="Type your message"
+                      style={{ backgroundColor: 'rgb(var(--color-surface-muted))', color: 'rgb(var(--color-text))', border: '1px solid rgb(var(--color-border))' }} />
+                    <button type="submit" disabled={!input.trim() || isLoading} className="absolute right-2 bottom-2 p-1 rounded-lg transition-colors text-white"
+                      style={{ backgroundColor: 'rgb(var(--color-primary-600))', opacity: (!input.trim() || isLoading) ? 0.4 : 1 }}
+                      onMouseEnter={(e) => { if (input.trim() && !isLoading) e.currentTarget.style.backgroundColor = 'rgb(var(--color-primary-700))'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgb(var(--color-primary-600))'; }}
+                      aria-label="Send message">
+                      <Send className="w-3 h-3" aria-hidden="true" />
+                    </button>
+                  </div>
+                </form>
+                <p className="text-[9px] mt-1 text-center" style={{ color: 'rgb(var(--color-text-disabled))' }}>
+                  Enter to send · Shift+Enter for new line · Voice supported
+                </p>
+              </div>
+          )}
           </div>
         </div>
       </div>

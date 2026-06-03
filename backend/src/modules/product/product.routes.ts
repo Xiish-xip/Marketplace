@@ -11,6 +11,7 @@ router.get('/attribute-template', productController.getAttributeTemplate);
 router.get('/search', productController.search);
 router.get('/slug/:slug', productController.getBySlug);
 router.get('/:id/questions', productController.getQuestions);
+router.get('/user/questions', authenticate, productController.getUserQuestions);
 router.post('/:id/questions', authenticate, productController.askQuestion);
 router.patch('/questions/:questionId/answer', authenticate, authorize('SELLER', 'ADMIN', 'SUPER_ADMIN'), productController.answerQuestion);
 router.post('/import/preview', authenticate, authorize('SELLER', 'ADMIN', 'SUPER_ADMIN'), productController.previewImport);

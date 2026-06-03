@@ -1,6 +1,6 @@
 import { prisma } from '../../common/prisma';
-import { AppError } from '../../common/errors';
 import { logger } from '../../common/logger';
+import crypto from 'crypto';
 
 /**
  * PluginWebhookService
@@ -27,6 +27,16 @@ interface WebhookResponse {
 }
 
 export class PluginWebhookService {
+  private parseJson<T>(value: unknown, fallback: T): T {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value !== 'string') return value as T;
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
   /**
    * Execute a tool via a plugin's registered webhook URL.
    */
@@ -41,12 +51,12 @@ export class PluginWebhookService {
 
     // Check if any plugin manifest declares this tool
     for (const plugin of plugins) {
-      const manifest = plugin.manifest as any;
-      const aiTools = manifest?.aiTools || [];
+      const manifest = this.parseJson<Record<string, any>>(plugin.manifest, {});
+      const aiTools = Array.isArray(manifest?.aiTools) ? manifest.aiTools : [];
       const toolDef = aiTools.find((t: any) => t.name === toolName);
 
       if (toolDef && plugin.webhookUrls) {
-        const urls: string[] = JSON.parse(plugin.webhookUrls as string);
+        const urls = this.parseJson<string[]>(plugin.webhookUrls, []);
 
         if (urls.length === 0) {
           continue;
@@ -140,9 +150,6 @@ export class PluginWebhookService {
    * Generate HMAC signature for webhook payload to ensure authenticity.
    */
   private signPayload(requestId: string, timestamp: string, webhookUrl: string): string {
-    // In production, use crypto module with a shared secret
-    // This is a placeholder implementation
-    const crypto = require('crypto');
     const secret = process.env.WEBHOOK_SIGNING_SECRET || 'development-secret';
     const message = `${requestId}|${timestamp}|${webhookUrl}`;
     return crypto.createHmac('sha256', secret).update(message).digest('hex');
@@ -179,8 +186,8 @@ export class PluginWebhookService {
     const tools: any[] = [];
 
     for (const plugin of plugins) {
-      const manifest = plugin.manifest as any;
-      const aiTools = manifest?.aiTools || [];
+      const manifest = this.parseJson<Record<string, any>>(plugin.manifest, {});
+      const aiTools = Array.isArray(manifest?.aiTools) ? manifest.aiTools : [];
 
       for (const tool of aiTools) {
         tools.push({

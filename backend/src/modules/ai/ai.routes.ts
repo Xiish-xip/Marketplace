@@ -20,6 +20,7 @@ interface ChatCompletionResponse {
 
 // Provider routes (admin)
 router.get('/providers', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), aiController.listProviders);
+router.get('/providers/:id/key', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), aiController.getProviderKey);
 router.post('/providers', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), aiController.createProvider);
 router.patch('/providers/:id', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), aiController.updateProvider);
 router.delete('/providers/:id', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), aiController.deleteProvider);
@@ -62,21 +63,27 @@ router.post('/v1/chat/completions', authenticate, asyncHandler(async (req: Reque
   let targetModel: string = model || 'gpt-3.5-turbo';
 
   for (const p of providers.data) {
-    if (p.isEnabled && (p.models.includes(model) || p.aiModels?.some((am: any) => am.slug === model))) {
+    const dbModel = p.aiModels?.find((am: any) => am.slug === model || am.name === model);
+    if (p.isEnabled && (p.models.includes(model) || dbModel)) {
       targetProvider = p.slug;
+      if (dbModel?.slug) targetModel = dbModel.slug;
       break;
     }
   }
 
-  if (!targetProvider && providers.data.length > 0) {
-    targetProvider = providers.data[0].slug;
+  if (!targetProvider) {
+    const fallbackProvider = providers.data.find((p: any) => p.isEnabled);
+    targetProvider = fallbackProvider?.slug || null;
   }
 
   if (!targetProvider) {
     return res.status(400).json({ error: { message: 'No AI providers configured', type: 'configuration_error' } });
   }
 
-  const completion = await aiService.chatCompletion(targetProvider, targetModel, messages || []);
+  const completion = await aiService.chatCompletion(targetProvider, targetModel, messages || [], {
+    temperature,
+    max_tokens,
+  });
   const comp = completion as unknown as ChatCompletionResponse;
   
   // Return in OpenAI format
@@ -102,7 +109,7 @@ router.post('/v1/completions', authenticate, asyncHandler(async (req: Request, r
 
   const completion = await aiService.chatCompletion(targetProvider, model || 'gpt-3.5-turbo', [
     { role: 'user' as const, content: prompt || '' },
-  ]);
+  ], { max_tokens });
   const comp = completion as unknown as ChatCompletionResponse;
 
   res.json({
@@ -124,24 +131,24 @@ router.post('/v1/embeddings', authenticate, asyncHandler(async (req: Request, re
   const { model, input } = req.body;
   const providers = await aiService.listProviders({ page: 1, limit: 50 });
   const targetProvider = providers.data.find((p: any) => p.isEnabled)?.slug;
+  const targetModel = model || 'text-embedding-3-small';
 
   if (!targetProvider) {
     return res.status(400).json({ error: { message: 'No AI providers configured', type: 'configuration_error' } });
   }
 
-  const texts = Array.isArray(input) ? input : [input || ''];
-  const embeddings = texts.map((text: string, i: number) => ({
-    object: 'embedding',
-    index: i,
-    embedding: new Array(1536).fill(0).map(() => Math.random() * 2 - 1), // Placeholder
-  }));
+  const providerResult = await aiService.createEmbeddings(targetProvider, targetModel, input);
 
-  res.json({
-    object: 'list',
-    data: embeddings,
-    model: model || 'text-embedding-ada-002',
-    usage: { prompt_tokens: texts.join(' ').split(' ').length, total_tokens: texts.join(' ').split(' ').length },
-  });
+  if (providerResult && Array.isArray(providerResult.data)) {
+    return res.json({
+      object: providerResult.object || 'list',
+      data: providerResult.data,
+      model: providerResult.model || targetModel,
+      usage: providerResult.usage || { prompt_tokens: 0, total_tokens: 0 },
+    });
+  }
+
+  res.json(providerResult);
 }));
 
 // POST /v1/responses - Generate responses (OpenAI new format)

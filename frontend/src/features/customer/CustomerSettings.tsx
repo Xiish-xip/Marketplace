@@ -10,6 +10,8 @@ import { usePreferenceStore } from '../../lib/preference-store';
 import { useAuthStore } from '../../lib/auth-store';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '../../lib/api-enhanced';
+import { assetUrl } from '../../lib/assets';
+import ImageMetadataInput, { type ImageMetadata } from '../../components/ImageMetadataInput';
 
 type SettingsTab = 'profile' | 'security' | 'notifications' | 'appearance' | 'addresses' | 'privacy';
 
@@ -31,11 +33,20 @@ function ProfileTab() {
     phone: user?.phone || '',
     bio: user?.bio || '',
   });
+  const [avatarMetadata, setAvatarMetadata] = useState<ImageMetadata>({
+    title: `${user?.firstName || 'User'}'s Avatar`,
+    altText: `${user?.firstName || 'User'} ${user?.lastName || ''}'s profile picture`,
+  });
 
   const uploadAvatar = useMutation({
     mutationFn: async (file: File) => {
       const payload = new FormData();
       payload.append('images', file);
+      // Attach metadata fields
+      if (avatarMetadata.title) payload.append('title', avatarMetadata.title);
+      if (avatarMetadata.altText) payload.append('altText', avatarMetadata.altText);
+      if (avatarMetadata.description) payload.append('description', avatarMetadata.description);
+      if (avatarMetadata.caption) payload.append('caption', avatarMetadata.caption);
       const res = await api.post('/upload/images', payload);
       return res.data.data[0];
     },
@@ -69,11 +80,19 @@ function ProfileTab() {
       {/* Avatar Section */}
       <div className="flex items-center gap-5 p-4 rounded-xl" style={{ backgroundColor: 'rgb(var(--color-surface-muted))' }}>
         <div className="relative group">
-          <div className="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white shadow-lg"
-            style={{ background: 'linear-gradient(135deg, rgb(var(--color-primary-500)), rgb(var(--color-primary-700)))' }}
-          >
-            {form.firstName?.[0]?.toUpperCase() || 'U'}{form.lastName?.[0]?.toUpperCase() || ''}
-          </div>
+          {user?.avatar ? (
+            <img
+              src={assetUrl(user.avatar)}
+              alt={user.firstName || 'User'}
+              className="w-20 h-20 rounded-full object-cover shadow-lg"
+            />
+          ) : (
+            <div className="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white shadow-lg"
+              style={{ background: 'linear-gradient(135deg, rgb(var(--color-primary-500)), rgb(var(--color-primary-700)))' }}
+            >
+              {form.firstName?.[0]?.toUpperCase() || 'U'}{form.lastName?.[0]?.toUpperCase() || ''}
+            </div>
+          )}
           <input type="file" accept="image/*" className="hidden" id="avatarUpload" onChange={handleAvatarChange} />
           <label htmlFor="avatarUpload" className="absolute bottom-0 right-0 w-8 h-8 rounded-full flex items-center justify-center shadow-md border-2 border-white transition-colors hover:bg-primary-100"
             style={{ backgroundColor: 'rgb(var(--color-primary-50))', borderColor: 'rgb(var(--color-white))' }}
@@ -88,6 +107,14 @@ function ProfileTab() {
           <p className="text-xs mt-1" style={{ color: 'rgb(var(--color-text-muted))' }}>Member since {new Date(user?.createdAt || Date.now()).toLocaleDateString()}</p>
         </div>
       </div>
+
+      {/* Avatar Metadata */}
+      <ImageMetadataInput
+        metadata={avatarMetadata}
+        onChange={setAvatarMetadata}
+        fields={{ title: true, altText: true, description: false, caption: false }}
+        labels={{ title: 'Avatar Name', altText: 'Alt Text (accessibility)' }}
+      />
 
       {/* Form Fields */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

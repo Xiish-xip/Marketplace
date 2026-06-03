@@ -7,7 +7,7 @@ const defaults = [
     value: {
       maxProductImages: 8,
       maxImageSizeMb: 15,
-      acceptedImageTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'],
+      acceptedImageTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/x-icon', 'image/vnd.microsoft.icon'],
     },
     type: 'json',
     description: 'Seller product image upload limits and accepted MIME types',

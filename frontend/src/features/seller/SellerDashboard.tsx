@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Package, ShoppingCart, DollarSign, Star, AlertTriangle, Plus, TrendingUp } from 'lucide-react';
 import { useSellerDashboard, useSellerAnalytics } from '../../lib/query-hooks';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import { Link } from 'react-router-dom';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -10,7 +10,7 @@ export default function SellerDashboard() {
   const [period, setPeriod] = useState('30d');
   const { data: analyticsData } = useSellerAnalytics(period);
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
   const dash = dashData?.data;
   const stats = dash?.stats;
   const analytics = analyticsData?.data;

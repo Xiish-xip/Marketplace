@@ -1,12 +1,16 @@
 import { prisma } from '../common/prisma';
 
 describe('Critical Flows', () => {
+  const uniqueValue = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const uniqueEmail = (prefix: string) => `${uniqueValue(prefix)}@example.com`;
+
   // ── Authentication Flow ──
   describe('Authentication Flow', () => {
     it('should create user with valid data', async () => {
+      const email = uniqueEmail('test');
       const user = await prisma.user.create({
         data: {
-          email: 'test@example.com',
+          email,
           passwordHash: 'hashed_password',
           firstName: 'Test',
           lastName: 'User',
@@ -14,19 +18,20 @@ describe('Critical Flows', () => {
         },
       });
       expect(user).toBeDefined();
-      expect(user.email).toBe('test@example.com');
+      expect(user.email).toBe(email);
       expect(user.isActive).toBe(true);
       expect(user.role).toBe('CUSTOMER');
       await prisma.user.delete({ where: { id: user.id } });
     });
 
     it('should prevent duplicate emails', async () => {
+      const email = uniqueEmail('dupe');
       const user = await prisma.user.create({
-        data: { email: 'dupe@example.com', passwordHash: 'hash', firstName: 'Dupe' },
+        data: { email, passwordHash: 'hash', firstName: 'Dupe' },
       });
       await expect(
         prisma.user.create({
-          data: { email: 'dupe@example.com', passwordHash: 'hash2', firstName: 'Dupe2' },
+          data: { email, passwordHash: 'hash2', firstName: 'Dupe2' },
         })
       ).rejects.toThrow();
       await prisma.user.delete({ where: { id: user.id } });
@@ -37,7 +42,7 @@ describe('Critical Flows', () => {
   describe('Cart Flow', () => {
     it('should create cart for user', async () => {
       const user = await prisma.user.create({
-        data: { email: 'cart@example.com', passwordHash: 'hash', firstName: 'Cart' },
+        data: { email: uniqueEmail('cart'), passwordHash: 'hash', firstName: 'Cart' },
       });
       const cart = await prisma.cart.create({
         data: { userId: user.id },
@@ -52,23 +57,25 @@ describe('Critical Flows', () => {
   // ── Product Flow ──
   describe('Product Flow', () => {
     it('should create product with seller', async () => {
+      const storeSlug = uniqueValue('test-store');
+      const productSlug = uniqueValue('test-product');
       const user = await prisma.user.create({
-        data: { email: 'seller-prod@example.com', passwordHash: 'hash', role: 'SELLER' },
+        data: { email: uniqueEmail('seller-prod'), passwordHash: 'hash', role: 'SELLER' },
       });
       const seller = await prisma.seller.create({
-        data: { userId: user.id, storeName: 'Test Store', storeSlug: 'test-store' },
+        data: { userId: user.id, storeName: `Test Store ${storeSlug}`, storeSlug },
       });
       const product = await prisma.product.create({
         data: {
           sellerId: seller.id,
           title: 'Test Product',
-          slug: 'test-product',
+          slug: productSlug,
           description: 'A test product',
           basePrice: 10000,
         },
       });
       expect(product).toBeDefined();
-      expect(product.slug).toBe('test-product');
+      expect(product.slug).toBe(productSlug);
       expect(product.basePrice).toBe(10000);
       await prisma.product.delete({ where: { id: product.id } });
       await prisma.seller.delete({ where: { id: seller.id } });
@@ -79,17 +86,18 @@ describe('Critical Flows', () => {
   // ── Order Flow ──
   describe('Order Flow', () => {
     it('should create order with items', async () => {
+      const storeSlug = uniqueValue('order-store');
       const buyer = await prisma.user.create({
-        data: { email: 'buyer@example.com', passwordHash: 'hash' },
+        data: { email: uniqueEmail('buyer'), passwordHash: 'hash' },
       });
       const sellerUser = await prisma.user.create({
-        data: { email: 'seller-order@example.com', passwordHash: 'hash', role: 'SELLER' },
+        data: { email: uniqueEmail('seller-order'), passwordHash: 'hash', role: 'SELLER' },
       });
       const seller = await prisma.seller.create({
-        data: { userId: sellerUser.id, storeName: 'Order Store', storeSlug: 'order-store' },
+        data: { userId: sellerUser.id, storeName: `Order Store ${storeSlug}`, storeSlug },
       });
       const product = await prisma.product.create({
-        data: { sellerId: seller.id, title: 'Order Product', slug: 'order-product', description: 'desc', basePrice: 5000 },
+        data: { sellerId: seller.id, title: 'Order Product', slug: uniqueValue('order-product'), description: 'desc', basePrice: 5000 },
       });
 
       const order = await prisma.order.create({
@@ -119,14 +127,15 @@ describe('Critical Flows', () => {
   // ── Payment Flow ──
   describe('Payment Flow', () => {
     it('should create payment record', async () => {
+      const storeSlug = uniqueValue('pay-store');
       const buyer = await prisma.user.create({
-        data: { email: 'pay-buyer@example.com', passwordHash: 'hash' },
+        data: { email: uniqueEmail('pay-buyer'), passwordHash: 'hash' },
       });
       const sellerUser = await prisma.user.create({
-        data: { email: 'pay-seller@example.com', passwordHash: 'hash', role: 'SELLER' },
+        data: { email: uniqueEmail('pay-seller'), passwordHash: 'hash', role: 'SELLER' },
       });
       const seller = await prisma.seller.create({
-        data: { userId: sellerUser.id, storeName: 'Pay Store', storeSlug: 'pay-store' },
+        data: { userId: sellerUser.id, storeName: `Pay Store ${storeSlug}`, storeSlug },
       });
       const order = await prisma.order.create({
         data: {
@@ -161,17 +170,18 @@ describe('Critical Flows', () => {
   // ── Review Flow ──
   describe('Review Flow', () => {
     it('should create product review', async () => {
+      const storeSlug = uniqueValue('rev-store');
       const user = await prisma.user.create({
-        data: { email: 'reviewer@example.com', passwordHash: 'hash' },
+        data: { email: uniqueEmail('reviewer'), passwordHash: 'hash' },
       });
       const sellerUser = await prisma.user.create({
-        data: { email: 'rev-seller@example.com', passwordHash: 'hash', role: 'SELLER' },
+        data: { email: uniqueEmail('rev-seller'), passwordHash: 'hash', role: 'SELLER' },
       });
       const seller = await prisma.seller.create({
-        data: { userId: sellerUser.id, storeName: 'Rev Store', storeSlug: 'rev-store' },
+        data: { userId: sellerUser.id, storeName: `Rev Store ${storeSlug}`, storeSlug },
       });
       const product = await prisma.product.create({
-        data: { sellerId: seller.id, title: 'Review Product', slug: 'review-product', description: 'desc', basePrice: 1000 },
+        data: { sellerId: seller.id, title: 'Review Product', slug: uniqueValue('review-product'), description: 'desc', basePrice: 1000 },
       });
 
       const review = await prisma.review.create({
@@ -226,7 +236,7 @@ describe('Critical Flows', () => {
   describe('Notification Flow', () => {
     it('should create and read notification', async () => {
       const user = await prisma.user.create({
-        data: { email: 'notif@example.com', passwordHash: 'hash' },
+        data: { email: uniqueEmail('notif'), passwordHash: 'hash' },
       });
       const notif = await prisma.notification.create({
         data: { userId: user.id, type: 'TEST', title: 'Test Notification', body: 'This is a test' },
@@ -248,10 +258,11 @@ describe('Critical Flows', () => {
   // ── Plugin Flow ──
   describe('Plugin Flow', () => {
     it('should create and toggle plugin', async () => {
+      const pluginSlug = uniqueValue('test-plugin');
       const plugin = await prisma.plugin.create({
         data: {
           name: 'Test Plugin',
-          slug: 'test-plugin',
+          slug: pluginSlug,
           version: '1.0.0',
           manifest: JSON.stringify({ name: 'Test Plugin', version: '1.0.0' }),
           scopes: JSON.stringify(['read:products']),
@@ -313,10 +324,11 @@ describe('Critical Flows', () => {
   // ── Workflow Flow ──
   describe('Workflow Flow', () => {
     it('should create workflow template and run', async () => {
+      const workflowSlug = uniqueValue('test-workflow');
       const template = await prisma.workflowTemplate.create({
         data: {
           name: 'Test Workflow',
-          slug: 'test-workflow',
+          slug: workflowSlug,
           steps: JSON.stringify([{ type: 'log', config: { message: 'Step 1' } }]),
           triggers: JSON.stringify(['manual']),
         },
@@ -339,10 +351,12 @@ describe('Critical Flows', () => {
   // ── AI Provider Flow ──
   describe('AI Provider Flow', () => {
     it('should create AI provider and model', async () => {
+      const providerSlug = uniqueValue('openai');
+      const modelSlug = uniqueValue('gpt-4');
       const provider = await prisma.aiProvider.create({
         data: {
-          name: 'OpenAI',
-          slug: 'openai',
+          name: `OpenAI ${providerSlug}`,
+          slug: providerSlug,
           provider: 'openai',
           models: JSON.stringify(['gpt-4', 'gpt-3.5-turbo']),
         },
@@ -352,7 +366,7 @@ describe('Critical Flows', () => {
       const model = await prisma.aiModel.create({
         data: {
           name: 'GPT-4',
-          slug: 'gpt-4',
+          slug: modelSlug,
           providerId: provider.id,
           capabilities: JSON.stringify(['chat', 'completion']),
           contextLength: 8192,

@@ -17,11 +17,17 @@ export class OrderService {
     return seller.id;
   }
 
-  private async ensureCanAccessOrder(order: { userId: string; sellerId: string }, user: AuthPayload) {
+  private async ensureCanAccessOrder(order: { userId: string; sellerId: string; id?: string }, user: AuthPayload) {
     if (this.isAdmin(user) || order.userId === user.userId) return;
     if (user.role === 'SELLER') {
       const sellerId = await this.getSellerIdForUser(user.userId);
       if (order.sellerId === sellerId) return;
+    }
+    if (user.role === 'DELIVERY' && order.id) {
+      const shipment = await prisma.shipment.findFirst({
+        where: { orderId: order.id },
+      });
+      if (shipment) return;
     }
     throw new AppError(403, 'Not authorized');
   }
@@ -103,12 +109,12 @@ export class OrderService {
             status: 'PENDING_PAYMENT',
             shippingAddress,
             shippingMethod: data.shippingMethod,
-            shippingFee: 0,
-            taxAmount: 0,
+            shippingFee: data.shippingFee ?? 0,
+            taxAmount: data.taxAmount ?? 0,
             discountAmount,
             couponCode: data.couponCode?.toUpperCase(),
             subtotal,
-            totalAmount: Math.max(0, subtotal - discountAmount),
+            totalAmount: Math.max(0, subtotal - discountAmount + (data.shippingFee ?? 0) + (data.taxAmount ?? 0)),
             paymentMethod: data.paymentMethod,
             notes: data.notes,
             items: {
@@ -163,7 +169,7 @@ export class OrderService {
       },
     });
     if (!order) throw new NotFoundError('Order not found');
-    await this.ensureCanAccessOrder(order, user);
+    await this.ensureCanAccessOrder({ ...order, id: order.id }, user);
     return order;
   }
 
@@ -177,12 +183,14 @@ export class OrderService {
       },
     });
     if (!order) throw new NotFoundError('Order not found');
-    await this.ensureCanAccessOrder(order, user);
+    await this.ensureCanAccessOrder({ ...order, id: order.id }, user);
     return order;
   }
 
   async findUserOrders(userId: string, query: any) {
-    const { page, limit, status, sortBy, sortOrder } = query;
+    const page = parseInt(query.page) || 1;
+    const limit = Math.min(parseInt(query.limit) || 20, 100);
+    const { status, sortBy, sortOrder } = query;
     const skip = (page - 1) * limit;
     const where: any = { userId };
     if (status) where.status = status;
@@ -210,7 +218,9 @@ export class OrderService {
 
   async findSellerOrders(userId: string, query: any) {
     const sellerId = await this.getSellerIdForUser(userId);
-    const { page, limit, status, sortBy, sortOrder } = query;
+    const page = parseInt(query.page) || 1;
+    const limit = Math.min(parseInt(query.limit) || 20, 100);
+    const { status, sortBy, sortOrder } = query;
     const skip = (page - 1) * limit;
     const where: any = { sellerId };
     if (status) where.status = status;
@@ -236,7 +246,9 @@ export class OrderService {
   }
 
   async findAll(query: any) {
-    const { page, limit, status, paymentStatus, startDate, endDate, sortBy, sortOrder } = query;
+    const page = parseInt(query.page) || 1;
+    const limit = Math.min(parseInt(query.limit) || 20, 100);
+    const { status, paymentStatus, startDate, endDate, sortBy, sortOrder } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
     if (status) where.status = status;
@@ -281,6 +293,55 @@ export class OrderService {
       where: { id },
       data: updateData,
       include: { items: true },
+    });
+  }
+
+  async getOrderMessages(orderId: string, user: AuthPayload) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { userId: true, sellerId: true, seller: { select: { userId: true } } },
+    });
+    if (!order) throw new NotFoundError('Order not found');
+
+    // Check access: admin, customer, seller, or assigned delivery person
+    if (this.isAdmin(user) || order.userId === user.userId) {
+      // allowed
+    } else if (user.role === 'SELLER') {
+      const sellerId = await this.getSellerIdForUser(user.userId);
+      if (order.sellerId !== sellerId) throw new AppError(403, 'Not authorized');
+    } else if (user.role === 'DELIVERY') {
+      // Check if this delivery person is assigned to this order
+      const shipment = await prisma.shipment.findFirst({
+        where: { orderId },
+      });
+      if (!shipment) throw new AppError(403, 'Not authorized');
+    } else {
+      throw new AppError(403, 'Not authorized');
+    }
+
+    const involvedUserIds = new Set([order.userId, order.seller.userId]);
+
+    const conversations = await prisma.conversation.findMany({
+      where: {
+        orderId,
+        OR: [
+          { buyerId: { in: Array.from(involvedUserIds) } },
+          { sellerId: { in: Array.from(involvedUserIds) } },
+        ],
+      },
+      select: { id: true },
+    });
+
+    const conversationIds = conversations.map((c) => c.id);
+    if (conversationIds.length === 0) return [];
+
+    return prisma.message.findMany({
+      where: { conversationId: { in: conversationIds } },
+      include: {
+        sender: { select: { id: true, firstName: true, lastName: true, avatar: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
     });
   }
 

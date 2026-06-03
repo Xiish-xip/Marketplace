@@ -16,6 +16,7 @@ router.get('/seller/orders', authenticate, authorize('SELLER'), orderController.
 router.get('/admin/all', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), orderController.getAll);
 router.patch('/:id/status', authenticate, authorize('SELLER', 'ADMIN', 'SUPER_ADMIN'), orderController.updateStatus);
 
+router.get('/:id/messages', authenticate, orderController.getOrderMessages);
 router.get('/:id', authenticate, orderController.getById);
 router.post('/:id/cancel', authenticate, orderController.cancelOrder);
 

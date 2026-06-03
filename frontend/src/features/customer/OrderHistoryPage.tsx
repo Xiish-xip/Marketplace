@@ -1,10 +1,10 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Package, ChevronDown, ChevronUp } from 'lucide-react';
+import { Package, ChevronDown, ChevronUp, Truck } from 'lucide-react';
 import { useOrders, useCancelOrder } from '../../lib/query-hooks';
 import { assetUrl } from '../../lib/assets';
 import EmptyState from '../shared/EmptyState';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 
 const statusStyles: Record<string, string> = {
   PENDING_PAYMENT: 'badge-warning',
@@ -23,7 +23,7 @@ export default function OrderHistoryPage() {
 
   const orders = data?.data || [];
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
   if (!orders.length) return <div className="page-container"><EmptyState icon={<Package className="w-8 h-8" />} title="No orders yet" description="Shop now and your orders will appear here" actionLabel="Start Shopping" actionHref="/products" /></div>;
 
   return (
@@ -68,6 +68,12 @@ export default function OrderHistoryPage() {
                 </div>
                 {['PENDING_PAYMENT', 'PAYMENT_CONFIRMED', 'PROCESSING'].includes(order.status) && (
                   <button onClick={() => cancelOrder.mutate(order.id)} className="btn-danger btn-sm">Cancel Order</button>
+                )}
+                {['READY_TO_SHIP', 'SHIPPED', 'IN_TRANSIT', 'AWAITING_CONFIRMATION', 'DELIVERED'].includes(order.status) && (
+                  <Link to={`/account/orders/${order.id}/tracking`} className="btn-secondary btn-sm">
+                    <Truck className="w-4 h-4" />
+                    Track delivery
+                  </Link>
                 )}
               </div>
             )}

@@ -5,7 +5,6 @@ import { patch, post } from '../../lib/api-enhanced';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { get } from '../../lib/api-enhanced';
 import DataTable from '../shared/DataTable';
-import LoadingScreen from '../shared/LoadingScreen';
 import toast from 'react-hot-toast';
 
 export default function AdminUsers() {

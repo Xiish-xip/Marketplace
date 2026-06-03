@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Moon, Sun, Accessibility as AccessibilityIcon, Contrast, X, Settings } from 'lucide-react';
 import { usePreferenceStore } from '../../lib/preference-store';
 
-export default function AccessibilityDock() {
+export default function AccessibilityDock({ hideTrigger = false }: { hideTrigger?: boolean } = {}) {
   const { theme, accessibility, highContrast, toggleTheme, toggleAccessibility, toggleHighContrast } = usePreferenceStore();
   const [dockOpen, setDockOpen] = useState(false);
   const dockRef = useRef<HTMLDivElement>(null);
@@ -18,6 +18,21 @@ export default function AccessibilityDock() {
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [dockOpen]);
+
+  // listen for floating actions events
+  useEffect(() => {
+    function handleToggle() { setDockOpen((v) => !v); }
+    function handleOpen() { setDockOpen(true); }
+    function handleClose() { setDockOpen(false); }
+    window.addEventListener('floating:toggle-accessibility', handleToggle);
+    window.addEventListener('floating:open-accessibility', handleOpen);
+    window.addEventListener('floating:close-accessibility', handleClose);
+    return () => {
+      window.removeEventListener('floating:toggle-accessibility', handleToggle);
+      window.removeEventListener('floating:open-accessibility', handleOpen);
+      window.removeEventListener('floating:close-accessibility', handleClose);
+    };
+  }, []);
 
   const toggleDock = () => {
     setDockOpen(!dockOpen);
@@ -84,22 +99,24 @@ export default function AccessibilityDock() {
       )}
 
       {/* Toggle Button */}
-      <button
-        type="button"
-        onClick={toggleDock}
-        className="h-10 w-10 rounded-full shadow-lg border grid place-items-center transition-all duration-200 hover:scale-105"
-        style={{
-          backgroundColor: dockOpen ? 'rgb(var(--color-primary-600))' : 'rgb(var(--color-surface))',
-          color: dockOpen ? 'white' : 'rgb(var(--color-text-secondary))',
-          borderColor: 'rgb(var(--color-border))',
-        }}
-        aria-label={dockOpen ? 'Close accessibility menu' : 'Open accessibility menu'}
-        aria-expanded={dockOpen}
-        aria-haspopup="true"
-        title="Accessibility"
-      >
-        {dockOpen ? <X className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
-      </button>
+      {!hideTrigger && (
+        <button
+          type="button"
+          onClick={toggleDock}
+          className="h-10 w-10 rounded-full shadow-lg border grid place-items-center transition-all duration-200 hover:scale-105"
+          style={{
+            backgroundColor: dockOpen ? 'rgb(var(--color-primary-600))' : 'rgb(var(--color-surface))',
+            color: dockOpen ? 'white' : 'rgb(var(--color-text-secondary))',
+            borderColor: 'rgb(var(--color-border))',
+          }}
+          aria-label={dockOpen ? 'Close accessibility menu' : 'Open accessibility menu'}
+          aria-expanded={dockOpen}
+          aria-haspopup="true"
+          title="Accessibility"
+        >
+          {dockOpen ? <X className="h-4 w-4" /> : <Settings className="h-4 w-4" />}
+        </button>
+      )}
     </div>
   );
 }

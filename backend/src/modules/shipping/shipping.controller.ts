@@ -3,8 +3,27 @@ import { ShippingService } from './shipping.service';
 import { asyncHandler } from '../../common/middleware';
 import { createShipmentSchema, labelRequestSchema, shipmentEventSchema, updateShipmentSchema } from './shipping.validation';
 import { ValidationError } from '../../common/errors';
+import { prisma } from '../../common/prisma';
 
 const shippingService = new ShippingService();
+
+export const getAll = asyncHandler(async (req: Request, res: Response) => {
+  const page = Number(req.query.page) || 1;
+  const limit = Number(req.query.limit) || 10;
+  const skip = (page - 1) * limit;
+  const where = req.query.status ? { status: String(req.query.status) } : {};
+  const [data, total] = await Promise.all([
+    prisma.shipment.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: { createdAt: 'desc' },
+      include: { order: { include: { user: true, seller: true } } },
+    }),
+    prisma.shipment.count({ where }),
+  ]);
+  res.json({ success: true, data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) || 1 } });
+});
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const result = createShipmentSchema.safeParse(req.body);
@@ -28,6 +47,11 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
   if (!result.success) throw new ValidationError(result.error.flatten().fieldErrors as Record<string, string[]>);
   const shipment = await shippingService.update(req.params.id, result.data);
   res.json({ success: true, data: shipment });
+});
+
+export const remove = asyncHandler(async (req: Request, res: Response) => {
+  const result = await shippingService.delete(req.params.id);
+  res.json({ success: true, ...result });
 });
 
 export const track = asyncHandler(async (req: Request, res: Response) => {

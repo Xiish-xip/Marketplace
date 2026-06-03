@@ -9,7 +9,7 @@ const quickActions = [
   { label: 'AI Chat', icon: '🤖', href: '/ai-chat' },
 ];
 
-export default function LiveSupport() {
+export default function LiveSupport({ hideTrigger = false }: { hideTrigger?: boolean } = {}) {
   const [open, setOpen] = useState(false);
   const [message, setMessage] = useState('');
   const panelRef = useRef<HTMLDivElement>(null);
@@ -27,22 +27,39 @@ export default function LiveSupport() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [open]);
 
+  // Listen for floating actions open/close/toggle
+  useEffect(() => {
+    function handleToggle() { setOpen((v) => !v); }
+    function handleOpen() { setOpen(true); }
+    function handleClose() { setOpen(false); }
+    window.addEventListener('floating:toggle-live', handleToggle);
+    window.addEventListener('floating:open-live', handleOpen);
+    window.addEventListener('floating:close-live', handleClose);
+    return () => {
+      window.removeEventListener('floating:toggle-live', handleToggle);
+      window.removeEventListener('floating:open-live', handleOpen);
+      window.removeEventListener('floating:close-live', handleClose);
+    };
+  }, []);
+
   return (
     <>
       {/* Floating button */}
-      <button
-        data-livesupport-trigger
-        onClick={() => setOpen(!open)}
-        className="fixed bottom-6 right-32 z-[9997] w-11 h-11 rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110"
-        style={{
-          backgroundColor: 'rgb(var(--color-primary-600))',
-          color: 'white',
-        }}
-        aria-label="Get help"
-        title="Get help"
-      >
-        {open ? <X className="w-5 h-5" /> : <MessageCircle className="w-5 h-5" />}
-      </button>
+      {!hideTrigger && (
+        <button
+          data-livesupport-trigger
+          onClick={() => setOpen(!open)}
+          className="fixed bottom-6 right-32 z-[9997] w-11 h-11 rounded-full shadow-xl flex items-center justify-center transition-all hover:scale-110"
+          style={{
+            backgroundColor: 'rgb(var(--color-primary-600))',
+            color: 'white',
+          }}
+          aria-label="Get help"
+          title="Get help"
+        >
+          {open ? <X className="w-5 h-5" /> : <MessageCircle className="w-5 h-5" />}
+        </button>
+      )}
 
       {/* Panel */}
       {open && (

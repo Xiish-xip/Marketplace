@@ -4,6 +4,7 @@ import { config } from './config';
 import { AppError, UnauthorizedError, ForbiddenError, ValidationError } from './errors';
 import { logger } from './logger';
 import { ApiKeyService } from '../modules/api-key/api-key.service';
+import { prisma } from './prisma';
 
 // ── Auth Middleware ──
 export interface AuthPayload {
@@ -22,7 +23,7 @@ declare global {
   }
 }
 
-export const authenticate: RequestHandler = (req, res, next) => {
+export const authenticate: RequestHandler = async (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return next(new UnauthorizedError('No token provided'));
@@ -31,6 +32,14 @@ export const authenticate: RequestHandler = (req, res, next) => {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, config.jwtSecret) as AuthPayload;
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: { id: true, role: true, isActive: true },
+    });
+    if (!user || !user.isActive) {
+      return next(new UnauthorizedError('Invalid or expired token'));
+    }
+    decoded.role = user.role;
     req.user = decoded;
     next();
   } catch (error) {

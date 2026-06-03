@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { ShoppingCart, CreditCard, Banknote, Smartphone, Truck, Check, ArrowLeft, ArrowRight } from 'lucide-react';
 import { useCart, useCreateOrder, usePublicConfig } from '../../lib/query-hooks';
 import { assetUrl } from '../../lib/assets';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 
 const steps = ['Shipping', 'Payment', 'Review'];
 
@@ -36,7 +36,7 @@ export default function CheckoutPage() {
     }
   }, [isLoading, items.length, navigate]);
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
   if (!items.length) return null;
 
   const subtotal = items.reduce((sum: number, item: any) => sum + (item.unitPrice || 0) * item.quantity, 0);

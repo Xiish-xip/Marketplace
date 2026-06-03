@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "1097040499432",
+    "project_id": "marketplace-9d6f2",
+    "storage_bucket": "marketplace-9d6f2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1097040499432:android:602d41828dd264f67f2f5d",
+        "android_client_info": {
+          "package_name": "com.marketo.marketplace"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1097040499432-3bt0rob0bn5tku9jd4g5l2ej0hrp4ul4.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBsWVsPj6n_EWI5Tt5GSZ8DX1kB9ewcu7U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1097040499432-3bt0rob0bn5tku9jd4g5l2ej0hrp4ul4.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

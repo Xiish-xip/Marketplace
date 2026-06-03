@@ -96,7 +96,7 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex" style={{ backgroundColor: 'rgb(var(--color-gray-50))', color: 'rgb(var(--color-text))' }}>
       {/* Left Side — Brand Showcase */}
       <div className="hidden lg:flex lg:w-1/2 relative bg-gradient-to-br from-gray-950 via-gray-900 to-primary-900 overflow-hidden">
         <div className="absolute inset-0 opacity-10">
@@ -174,7 +174,7 @@ export default function RegisterPage() {
       </div>
 
       {/* Right Side — Register Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12 bg-gray-50 dark:bg-gray-950">
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12" style={{ backgroundColor: 'rgb(var(--color-gray-50))' }}>
         <div className="w-full max-w-md">
           {/* Mobile Logo */}
           <div className="lg:hidden text-center mb-10">
@@ -186,7 +186,7 @@ export default function RegisterPage() {
                   <span className="text-white font-bold text-sm">{name[0]}</span>
                 </div>
               )}
-              <span className="text-xl font-bold text-gray-900 dark:text-white">{name}</span>
+              <span className="text-xl font-bold" style={{ color: 'rgb(var(--color-text))' }}>{name}</span>
             </Link>
           </div>
 
@@ -195,14 +195,14 @@ export default function RegisterPage() {
               <div className="hidden lg:block w-14 h-14 bg-primary-600 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-primary-600/20">
                 <ShoppingBag className="text-white h-7 w-7" />
               </div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Create Account</h1>
-              <p className="text-gray-500 dark:text-gray-400 mt-2">Fill in your details to get started</p>
+              <h1 className="text-2xl font-bold" style={{ color: 'rgb(var(--color-text))' }}>Create Account</h1>
+              <p className="mt-2" style={{ color: 'rgb(var(--color-text-muted))' }}>Fill in your details to get started</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                     First Name <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -216,7 +216,7 @@ export default function RegisterPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                     Last Name <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -232,7 +232,7 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium mb-1" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                   Email Address
                 </label>
                 <input
@@ -246,7 +246,7 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium mb-1" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                   Phone Number
                 </label>
                 <input
@@ -257,11 +257,11 @@ export default function RegisterPage() {
                   className="input-field"
                   placeholder="255712345678"
                 />
-                <p className="text-xs text-gray-400 mt-1">Include country code (e.g. 255 for Tanzania)</p>
+                <p className="text-xs mt-1" style={{ color: 'rgb(var(--color-text-disabled))' }}>Include country code (e.g. 255 for Tanzania)</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium mb-1" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                   Password <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
@@ -278,7 +278,8 @@ export default function RegisterPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={{ color: 'rgb(var(--color-text-muted))' }}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -301,7 +302,7 @@ export default function RegisterPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                <label className="block text-sm font-medium mb-1" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                   Confirm Password <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
@@ -317,7 +318,8 @@ export default function RegisterPage() {
                   <button
                     type="button"
                     onClick={() => setShowConfirm(!showConfirm)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={{ color: 'rgb(var(--color-text-muted))' }}
                   >
                     {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -345,9 +347,10 @@ export default function RegisterPage() {
                   type="checkbox"
                   checked={acceptTerms}
                   onChange={(e) => setAcceptTerms(e.target.checked)}
-                  className="mt-0.5 rounded border-gray-300 dark:border-gray-700 text-primary-600 focus:ring-primary-500"
+                  className="mt-0.5 rounded text-primary-600 focus:ring-primary-500"
+                  style={{ borderColor: 'rgb(var(--color-border-strong))' }}
                 />
-                <span className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                <span className="text-xs leading-relaxed" style={{ color: 'rgb(var(--color-text-muted))' }}>
                   I agree to the <Link to="/pages/terms" className="text-primary-600 hover:text-primary-700 font-medium">Terms of Service</Link> and <Link to="/pages/privacy" className="text-primary-600 hover:text-primary-700 font-medium">Privacy Policy</Link>
                 </span>
               </label>
@@ -368,12 +371,12 @@ export default function RegisterPage() {
                 )}
               </button>
 
-              <p className="text-xs text-center text-gray-400 dark:text-gray-500">
+              <p className="text-xs text-center" style={{ color: 'rgb(var(--color-text-disabled))' }}>
                 By signing up, you'll receive an OTP to verify your account
               </p>
             </form>
 
-            <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-6">
+            <p className="text-center text-sm mt-6" style={{ color: 'rgb(var(--color-text-muted))' }}>
               Already have an account?{' '}
               <Link to="/login" className="text-primary-600 hover:text-primary-700 font-semibold">
                 Sign in
@@ -383,17 +386,17 @@ export default function RegisterPage() {
 
           {/* Mobile trust badges */}
           <div className="lg:hidden mt-6 grid grid-cols-3 gap-3 text-center text-xs">
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+            <div className="rounded-lg border p-3" style={{ borderColor: 'rgb(var(--color-border))' }}>
               <ShieldCheck className="h-4 w-4 text-primary-600 mx-auto mb-1" />
-              <span className="text-gray-500 dark:text-gray-400">Protected</span>
+              <span style={{ color: 'rgb(var(--color-text-muted))' }}>Protected</span>
             </div>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+            <div className="rounded-lg border p-3" style={{ borderColor: 'rgb(var(--color-border))' }}>
               <Store className="h-4 w-4 text-primary-600 mx-auto mb-1" />
-              <span className="text-gray-500 dark:text-gray-400">Seller tools</span>
+              <span style={{ color: 'rgb(var(--color-text-muted))' }}>Seller tools</span>
             </div>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+            <div className="rounded-lg border p-3" style={{ borderColor: 'rgb(var(--color-border))' }}>
               <Headphones className="h-4 w-4 text-primary-600 mx-auto mb-1" />
-              <span className="text-gray-500 dark:text-gray-400">Support</span>
+              <span style={{ color: 'rgb(var(--color-text-muted))' }}>Support</span>
             </div>
           </div>
         </div>

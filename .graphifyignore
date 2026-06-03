@@ -1,0 +1,38 @@
+# Version control and generated Graphify output
+.git/
+graphify-out/
+
+# Dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Build outputs and caches
+dist/
+build/
+coverage/
+.cache/
+.turbo/
+.vite/
+tmp/
+temp/
+
+# Lockfiles and package manager metadata
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+bun.lockb
+
+# Environment and local runtime files
+.env
+.env.local
+.env.*.local
+*.log
+uploads/
+backend/uploads/
+
+# System and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

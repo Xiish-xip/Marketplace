@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import api from '../../lib/api';
 import { Save, RefreshCw, Plus, Trash2, Edit3, Shield, AlertTriangle, ToggleLeft, ToggleRight, FileCode, Search, Lock, Unlock, ChevronDown, ChevronRight } from 'lucide-react';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 interface AiTool {
   id: string;
@@ -47,6 +48,7 @@ const RISK_LEVELS = ['low', 'medium', 'high', 'critical'];
 const ROLES = ['CUSTOMER', 'SELLER', 'ADMIN', 'SUPER_ADMIN'];
 
 export default function AdminAiToolRegistry() {
+  const confirmAction = useConfirm();
   const [activeTab, setActiveTab] = useState('tools');
   const [tools, setTools] = useState<AiTool[]>([]);
   const [loading, setLoading] = useState(true);
@@ -171,7 +173,13 @@ export default function AdminAiToolRegistry() {
   };
 
   const handleDelete = async (toolId: string, name: string) => {
-    if (!confirm(`Delete tool "${name}"? This cannot be undone.`)) return;
+    const confirmed = await confirmAction({
+      title: 'Delete AI tool?',
+      message: `Delete "${name}"? This cannot be undone.`,
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     setSaving(true);
     try {
       const { data } = await api.delete(`/ai-tools/${toolId}`);

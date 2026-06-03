@@ -3,46 +3,55 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// ── User & Authentication ──
 model User {
-  id                String   @id @default(uuid())
-  email             String?  @unique
-  phone             String?  @unique
-  passwordHash      String
-  firstName         String?
-  lastName          String?
-  gender            String?  // male, female, other
-  dateOfBirth       DateTime?
-  avatar            String?
-  role              String   @default("CUSTOMER")
-  isVerified        Boolean  @default(false)
-  isActive          Boolean  @default(true)
-  kycStatus         String   @default("PENDING")
-  kycInfo           String?  // JSON string
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  addresses         UserAddress[]
-  preferences       UserPreference?
-  cart              Cart?
-  orders            Order[]
-  reviews           Review[]
-  reviewReplies     ReviewReply[]
-  wishlistItems     WishlistItem[]
-  notifications     Notification[]
-  returnRequests    ReturnRequest[]
-  auditLogs         AuditLog[]
-  seller            Seller?
-  refreshTokens     RefreshToken[]
+  id                  String               @id @default(uuid())
+  email               String?              @unique
+  phone               String?              @unique
+  passwordHash        String
+  firstName           String?
+  lastName            String?
+  gender              String?
+  dateOfBirth         DateTime?
+  avatar              String?
+  role                String               @default("CUSTOMER")
+  isVerified          Boolean              @default(false)
+  isActive            Boolean              @default(true)
+  kycStatus           String               @default("PENDING")
+  kycInfo             String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  cart                Cart?
+  auditLogs           AuditLog[]
+  buyerConversations  Conversation[]       @relation("BuyerConversations")
+  sellerConversations Conversation[]       @relation("SellerConversations")
   loyaltyTransactions LoyaltyTransaction[]
-  buyerConversations  Conversation[]    @relation("BuyerConversations")
-  sellerConversations Conversation[]    @relation("SellerConversations")
   sentMessages        Message[]
+  notifications       Notification[]
+  orders              Order[]
+  refreshTokens       RefreshToken[]
+  returnRequests      ReturnRequest[]
+  reviewReplies       ReviewReply[]
+  reviews             Review[]
+  seller              Seller?
+  businessAccount     BusinessAccount?
+  productQuestions    ProductQuestion[]    @relation("AskedProductQuestions")
+  answeredQuestions   ProductQuestion[]    @relation("AnsweredProductQuestions")
+  subscriptions       Subscription[]
+  addresses           UserAddress[]
+  following           UserFollow[]         @relation("UserFollows")
+  followers           UserFollow[]         @relation("UserFollowing")
+  preferences         UserPreference?
+  referrals           Referral[]
+  wishlistItems       WishlistItem[]
+
+  @@index([email])
+  @@index([phone])
   @@index([email, phone])
+  @@index([role, isActive])
   @@map("users")
 }
 
@@ -50,85 +59,166 @@ model RefreshToken {
   id        String   @id @default(uuid())
   token     String   @unique
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([token, userId])
   @@map("refresh_tokens")
 }
 
 model UserAddress {
-  id         String   @id @default(uuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  label      String?  // Home, Work, etc.
-  phone      String?
-  street     String
-  city       String
-  state      String?
-  zipCode    String?
-  country    String   @default("TZ")
-  latitude   Float?
-  longitude  Float?
-  isDefault  Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(uuid())
+  userId    String
+  label     String?
+  phone     String?
+  street    String
+  city      String
+  state     String?
+  zipCode   String?
+  country   String   @default("TZ")
+  latitude  Float?
+  longitude Float?
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@map("user_addresses")
 }
 
 model UserPreference {
-  id            String  @id @default(uuid())
-  userId        String  @unique
-  user          User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  language      String  @default("en")
-  currency      String  @default("TZS")
-  smsEnabled    Boolean @default(true)
-  emailEnabled  Boolean @default(true)
-  pushEnabled   Boolean @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  language     String   @default("en")
+  currency     String   @default("TZS")
+  smsEnabled   Boolean  @default(true)
+  emailEnabled Boolean  @default(true)
+  pushEnabled  Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_preferences")
 }
 
-// ── Seller ──
-model Seller {
-  id                String   @id @default(uuid())
-  userId            String   @unique
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  storeName         String   @unique
-  storeSlug         String   @unique
-  storeLogo         String?
-  storeBanner       String?
-  storeDescription  String?
-  storeLocation     String?
-  storefrontLayout  String?  // JSON string
-  sellerType        String   @default("INDIVIDUAL")
-  kycStatus         String   @default("PENDING")
-  kycDocuments      String?  // JSON string
-  shippingPolicy    String?
-  returnPolicy      String?
-  warrantyPolicy    String?
-  commissionRate    Float    @default(0.05)
-  isActive          Boolean  @default(true)
-  isVerified        Boolean  @default(false)
-  rating            Float    @default(0.0)
-  responseRate      Float    @default(100.0)
-  totalOrders       Int      @default(0)
-  totalRevenue      Float    @default(0.0)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+model UserFollow {
+  id          String   @id @default(uuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("UserFollows", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("UserFollowing", fields: [followingId], references: [id], onDelete: Cascade)
 
-  products          Product[]
-  orders            Order[]
-  reviews           Review[]
-  payouts           SellerPayout[]
-  couponRules       CouponRule[]
-  storefrontSections StorefrontSection[]
-  rfqThreads        RfqThread[]
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+  @@map("user_follows")
+}
+
+model PageLayout {
+  id             String        @id @default(uuid())
+  slug           String        @unique
+  title          String
+  description    String?
+  path           String?
+  pageType       String        @default("custom")
+  isSystem       Boolean       @default(false)
+  isPublished    Boolean       @default(false)
+  isActive       Boolean       @default(true)
+  metadata       String?
+  themeOverrides String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  sections       PageSection[]
+
+  @@index([slug, pageType, isPublished, isActive])
+  @@map("page_layouts")
+}
+
+model PageSection {
+  id              String     @id @default(uuid())
+  layoutId        String
+  title           String?
+  props           String     @default("{}")
+  sortOrder       Int        @default(0)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  animation       String?
+  backgroundColor String?
+  componentType   String
+  containerWidth  String     @default("full")
+  cssClass        String?
+  hideOnDesktop   Boolean    @default(false)
+  hideOnMobile    Boolean    @default(false)
+  hideOnTablet    Boolean    @default(false)
+  isVisible       Boolean    @default(true)
+  marginBottom    String?
+  marginTop       String?
+  paddingBottom   String?
+  paddingTop      String?
+  style           String?
+  visibilityRules String?
+  layout          PageLayout @relation(fields: [layoutId], references: [id], onDelete: Cascade)
+
+  @@index([layoutId, sortOrder, isVisible])
+  @@map("page_sections")
+}
+
+model ComponentDefinition {
+  id           String   @id @default(uuid())
+  type         String   @unique
+  label        String
+  description  String?
+  category     String
+  icon         String?
+  defaultProps String   @default("{}")
+  schema       String?
+  isSystem     Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([category, isActive])
+  @@map("component_definitions")
+}
+
+model Seller {
+  id                  String                @id @default(uuid())
+  userId              String                @unique
+  storeName           String                @unique
+  storeSlug           String                @unique
+  storeLogo           String?
+  storeBanner         String?
+  storeDescription    String?
+  storeLocation       String?
+  storefrontLayout    String?
+  sellerType          String                @default("INDIVIDUAL")
+  kycStatus           String                @default("PENDING")
+  kycDocuments        String?
+  shippingPolicy      String?
+  returnPolicy        String?
+  warrantyPolicy      String?
+  commissionRate      Float                 @default(0.05)
+  isActive            Boolean               @default(true)
+  isVerified          Boolean               @default(false)
+  rating              Float                 @default(0.0)
+  responseRate        Float                 @default(100.0)
+  totalOrders         Int                   @default(0)
+  totalRevenue        Float                 @default(0.0)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  couponRules         CouponRule[]
+  orders              Order[]
+  products            Product[]
+  reviews             Review[]
+  rfqThreads          RfqThread[]
+  payouts             SellerPayout[]
+  user                User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storefrontSections  StorefrontSection[]
+  shippingProfiles    ShippingProfile[]
+  DropshipApplication DropshipApplication[]
 
   @@index([storeSlug, isActive])
   @@map("sellers")
@@ -137,149 +227,147 @@ model Seller {
 model StorefrontSection {
   id                 String   @id @default(uuid())
   sellerId           String
-  seller             Seller   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   title              String
   type               String   @default("FEATURED_PRODUCTS")
   sortOrder          Int      @default(0)
   isActive           Boolean  @default(true)
-  featuredProductIds String?  // JSON string
-  metadata           String?  // JSON string
+  featuredProductIds String?
+  metadata           String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+  seller             Seller   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@index([sellerId, isActive, sortOrder])
   @@map("storefront_sections")
 }
 
 model SellerPayout {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   sellerId    String
-  seller      Seller   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   amount      Float
-  status      String   @default("PENDING")
+  status      String    @default("PENDING")
   method      String
   accountRef  String
   periodStart DateTime?
   periodEnd   DateTime?
   paidAt      DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
+  seller      Seller    @relation(fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@index([sellerId, status])
   @@map("seller_payouts")
 }
 
-// ── Categories & Brands ──
 model Category {
-  id              String     @id @default(uuid())
-  name            String
-  slug            String     @unique
-  description     String?
-  image           String?
-  parentId        String?
-  parent          Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
-  children        Category[] @relation("CategoryHierarchy")
-  level           Int        @default(0)
-  sortOrder       Int        @default(0)
-  isActive        Boolean    @default(true)
-  filters         String?    // JSON string
-  attributes      String?    // JSON string
-  commissionRate  Float?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-
-  products        Product[]
+  id             String     @id @default(uuid())
+  name           String
+  slug           String     @unique
+  description    String?
+  image          String?
+  parentId       String?
+  level          Int        @default(0)
+  sortOrder      Int        @default(0)
+  isActive       Boolean    @default(true)
+  filters        String?
+  attributes     String?
+  commissionRate Float?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  parent         Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children       Category[] @relation("CategoryHierarchy")
+  products       Product[]
 
   @@index([slug, parentId, isActive])
   @@map("categories")
 }
 
 model Brand {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  slug        String   @unique
+  id          String    @id @default(uuid())
+  name        String    @unique
+  slug        String    @unique
   logo        String?
   description String?
-  isApproved  Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  isApproved  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   products    Product[]
 
   @@index([slug])
   @@map("brands")
 }
 
-// ── Product ──
 model Product {
-  id                String          @id @default(uuid())
+  id                String             @id @default(uuid())
   sellerId          String
-  seller            Seller          @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   categoryId        String?
-  category          Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   brandId           String?
-  brand             Brand?          @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  shippingProfileId String?
   title             String
-  slug              String          @unique
+  slug              String             @unique
   description       String
-  specifications    String?         // JSON string
-  basePrice         Float
+  specifications    String?
+  basePrice         Float              /// Must be >= 0
   discountPrice     Float?
   costPrice         Float?
-  currency          String          @default("TZS")
-  status            String          @default("DRAFT")
-  isActive          Boolean         @default(true)
-  isFeatured        Boolean         @default(false)
-  rating            Float           @default(0.0)
-  reviewCount       Int             @default(0)
-  totalSales        Int             @default(0)
+  currency          String             @default("TZS")
+  status            String             @default("DRAFT")
+  isActive          Boolean            @default(true)
+  isFeatured        Boolean            @default(false)
+  rating            Float              @default(0.0)
+  reviewCount       Int                @default(0)
+  totalSales        Int                @default(0)
   searchVector      String?
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-
-  images            ProductImage[]
-  variants          ProductVariant[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  campaignProducts  CampaignProduct[]
   cartItems         CartItem[]
   orderItems        OrderItem[]
-  reviews           Review[]
-  wishlistItems     WishlistItem[]
-  campaignProducts  CampaignProduct[]
+  images            ProductImage[]
   importRows        ProductImportRow[]
+  variants          ProductVariant[]
+  brand             Brand?             @relation(fields: [brandId], references: [id])
+  category          Category?          @relation(fields: [categoryId], references: [id])
+  seller            Seller             @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  shippingProfile   ShippingProfile?   @relation(fields: [shippingProfileId], references: [id], onDelete: SetNull)
+  questions         ProductQuestion[]
+  reviews           Review[]
   rfqThreads        RfqThread[]
+  wishlistItems     WishlistItem[]
 
   @@index([slug, sellerId, categoryId, status, isActive])
+  @@index([shippingProfileId])
   @@map("products")
 }
 
 model ProductImportJob {
-  id             String   @id @default(uuid())
-  sellerId       String
-  fileName       String?
-  status         String   @default("PREVIEW")
-  totalRows      Int      @default(0)
-  validRows      Int      @default(0)
-  invalidRows    Int      @default(0)
-  summary        String?  // JSON string
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  rows           ProductImportRow[]
+  id          String             @id @default(uuid())
+  sellerId    String
+  fileName    String?
+  status      String             @default("PREVIEW")
+  totalRows   Int                @default(0)
+  validRows   Int                @default(0)
+  invalidRows Int                @default(0)
+  summary     String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  rows        ProductImportRow[]
 
   @@index([sellerId, status, createdAt])
   @@map("product_import_jobs")
 }
 
 model ProductImportRow {
-  id          String   @id @default(uuid())
-  jobId       String
-  job         ProductImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  productId   String?
-  product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  rowNumber   Int
-  rawData     String   // JSON string
-  errors      String?  // JSON string
-  warnings    String?  // JSON string
-  status      String   @default("VALID")
-  createdAt   DateTime @default(now())
+  id        String           @id @default(uuid())
+  jobId     String
+  productId String?
+  rowNumber Int
+  rawData   String
+  errors    String?
+  warnings  String?
+  status    String           @default("VALID")
+  createdAt DateTime         @default(now())
+  job       ProductImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  product   Product?         @relation(fields: [productId], references: [id])
 
   @@index([jobId, status])
   @@map("product_import_rows")
@@ -288,199 +376,190 @@ model ProductImportRow {
 model ProductImage {
   id        String  @id @default(uuid())
   productId String
-  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   url       String
   alt       String?
   sortOrder Int     @default(0)
   isPrimary Boolean @default(false)
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
   @@map("product_images")
 }
 
 model ProductVariant {
-  id                String       @id @default(uuid())
+  id                String      @id @default(uuid())
   productId         String
-  product           Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
-  sku               String       @unique
+  sku               String      @unique
   barcode           String?
-  attributes        String?      // JSON string
+  attributes        String?
   price             Float
   discountPrice     Float?
-  stock             Int          @default(0)
-  lowStockThreshold Int          @default(5)
+  stock             Int         @default(0) /// Must be >= 0
+  lowStockThreshold Int         @default(5)
   weight            Float?
-  dimensions        String?      // JSON string
-  isActive          Boolean      @default(true)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-
+  dimensions        String?
+  isActive          Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
   cartItems         CartItem[]
   orderItems        OrderItem[]
+  product           Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([sku, productId, isActive])
   @@map("product_variants")
 }
 
-// ── Cart ──
 model Cart {
-  id        String    @id @default(uuid())
-  userId    String    @unique
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
+  id        String     @id @default(uuid())
+  userId    String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   items     CartItem[]
 }
 
 model CartItem {
-  id        String         @id @default(uuid())
+  id        String          @id @default(uuid())
   cartId    String
-  cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
   productId String
-  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
   variantId String?
-  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
   sellerId  String
-  quantity  Int            @default(1)
+  quantity  Int             @default(1)
   note      String?
-  createdAt DateTime       @default(now())
+  createdAt DateTime        @default(now())
+  cart      Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant   ProductVariant? @relation(fields: [variantId], references: [id])
 
   @@index([cartId, productId, variantId])
   @@map("cart_items")
 }
 
-// ── Order ──
 model Order {
-  id              String       @id @default(uuid())
-  orderNumber     String       @unique
-  userId          String
-  user            User         @relation(fields: [userId], references: [id])
-  sellerId        String
-  seller          Seller       @relation(fields: [sellerId], references: [id])
-  status          String       @default("PENDING_PAYMENT")
-  shippingAddress String?      // JSON string
-  shippingMethod  String?
-  shippingFee     Float        @default(0.0)
-  taxAmount       Float        @default(0.0)
-  discountAmount  Float        @default(0.0)
-  couponCode      String?
-  subtotal        Float        @default(0.0)
-  totalAmount     Float        @default(0.0)
-  paymentMethod   String?
-  paymentStatus   String       @default("PENDING")
-  trackingNumber  String?
-  courierCode     String?
+  id               String          @id @default(uuid())
+  orderNumber      String          @unique
+  userId           String
+  sellerId         String
+  status           String          @default("PENDING_PAYMENT")
+  shippingAddress  String?
+  shippingMethod   String?
+  shippingFee      Float           @default(0.0)
+  taxAmount        Float           @default(0.0)
+  discountAmount   Float           @default(0.0)
+  couponCode       String?
+  subtotal         Float           @default(0.0)
+  totalAmount      Float           @default(0.0)
+  paymentMethod    String?
+  paymentStatus    String          @default("PENDING")
+  trackingNumber   String?
+  courierCode      String?
   deliveryEstimate DateTime?
-  deliveredAt     DateTime?
-  notes           String?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-
-  items           OrderItem[]
-  payments        Payment[]
-  shipments       Shipment[]
-  reviews         Review[]
-  returnRequests  ReturnRequest[]
+  deliveredAt      DateTime?
+  notes            String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  items            OrderItem[]
+  seller           Seller          @relation(fields: [sellerId], references: [id])
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments         Payment[]
+  returnRequests   ReturnRequest[]
+  reviews          Review[]
+  shipments        Shipment[]
 
   @@index([orderNumber, userId, sellerId, status])
   @@map("orders")
 }
 
 model OrderItem {
-  id              String         @id @default(uuid())
+  id              String          @id @default(uuid())
   orderId         String
-  order           Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId       String
-  product         Product        @relation(fields: [productId], references: [id])
   variantId       String?
-  variant         ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
-  productSnapshot String?        // JSON string
-  quantity        Int            @default(1)
+  productSnapshot String?
+  quantity        Int             @default(1)
   unitPrice       Float
-  discount        Float          @default(0.0)
+  discount        Float           @default(0.0)
   totalPrice      Float
   status          String?
+  order           Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product         @relation(fields: [productId], references: [id])
+  variant         ProductVariant? @relation(fields: [variantId], references: [id])
 
   @@index([orderId, productId])
   @@map("order_items")
 }
 
-// ── Payment ──
 model Payment {
-  id            String   @id @default(uuid())
+  id            String    @id @default(uuid())
   orderId       String
-  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   method        String
   provider      String?
   transactionId String?
   amount        Float
-  currency      String   @default("TZS")
-  status        String   @default("PENDING")
-  metadata      String?  // JSON string
+  currency      String    @default("TZS")
+  status        String    @default("PENDING")
+  metadata      String?
   paidAt        DateTime?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime  @default(now())
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId, transactionId, status])
   @@map("payments")
 }
 
-// ── Shipping ──
 model Shipment {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   orderId        String
-  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   courierCode    String
   trackingNumber String?
-  status         String   @default("PENDING")
+  status         String    @default("PENDING")
   origin         String?
   destination    String?
   weight         Float?
-  dimensions     String?  // JSON string
+  dimensions     String?
   labelUrl       String?
   estimatedDays  Int?
   shippedAt      DateTime?
   deliveredAt    DateTime?
-  events         String?  // JSON string
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  events         String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  order          Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId, trackingNumber, courierCode])
   @@map("shipments")
 }
 
-// ── Reviews ──
 model Review {
-  id         String       @id @default(uuid())
+  id         String        @id @default(uuid())
   userId     String
-  user       User         @relation(fields: [userId], references: [id])
-  productId  String
-  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  String?
   orderId    String?
-  order      Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
   sellerId   String?
-  seller     Seller?      @relation(fields: [sellerId], references: [id], onDelete: SetNull)
-  rating     Int
+  rating     Int           @db.SmallInt /// Must be between 1 and 5
   title      String?
   text       String?
-  isVerified Boolean      @default(false)
-  isApproved Boolean      @default(true)
-  createdAt  DateTime     @default(now())
-  updatedAt  DateTime     @updatedAt
-
+  isVerified Boolean       @default(false)
+  isApproved Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
   images     ReviewImage[]
   replies    ReviewReply[]
+  order      Order?        @relation(fields: [orderId], references: [id])
+  product    Product?      @relation(fields: [productId], references: [id])
+  seller     Seller?       @relation(fields: [sellerId], references: [id])
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([productId, userId, orderId])
   @@map("reviews")
 }
 
 model ReviewImage {
-  id        String  @id @default(uuid())
+  id        String @id @default(uuid())
   reviewId  String
-  review    Review  @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   url       String
-  sortOrder Int     @default(0)
+  sortOrder Int    @default(0)
+  review    Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
   @@index([reviewId])
   @@map("review_images")
@@ -489,74 +568,78 @@ model ReviewImage {
 model ReviewReply {
   id        String   @id @default(uuid())
   reviewId  String
-  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   text      String
   createdAt DateTime @default(now())
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([reviewId])
   @@map("review_replies")
 }
 
-// ── Q&A ──
 model ProductQuestion {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   productId  String
   userId     String
   question   String
   answer     String?
   answeredBy String?
   answeredAt DateTime?
-  createdAt  DateTime @default(now())
+  isApproved Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user       User      @relation("AskedProductQuestions", fields: [userId], references: [id], onDelete: Cascade)
+  answerer   User?     @relation("AnsweredProductQuestions", fields: [answeredBy], references: [id], onDelete: SetNull)
 
   @@index([productId])
+  @@index([userId])
+  @@index([answeredBy])
   @@map("product_questions")
 }
 
 model RfqThread {
-  id          String   @id @default(uuid())
+  id          String       @id @default(uuid())
   buyerId     String
   sellerId    String
-  seller      Seller   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   productId   String?
-  product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
   subject     String
   quantity    Int?
   targetPrice Float?
-  status      String   @default("OPEN")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  status      String       @default("OPEN")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   messages    RfqMessage[]
+  product     Product?     @relation(fields: [productId], references: [id])
+  seller      Seller       @relation(fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@index([buyerId, sellerId, productId, status])
   @@map("rfq_threads")
 }
 
 model RfqMessage {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   threadId  String
-  thread    RfqThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
   senderId  String
   body      String
-  offer     String?  // JSON string
-  createdAt DateTime @default(now())
+  offer     String?
+  createdAt DateTime  @default(now())
+  thread    RfqThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
   @@index([threadId, senderId])
   @@map("rfq_messages")
 }
 
 model SearchIndexJob {
-  id          String   @id @default(uuid())
-  status      String   @default("PENDING")
-  filters     String?  // JSON string
-  totalItems   Int      @default(0)
-  indexedItems Int      @default(0)
-  errors      String?  // JSON string
-  startedAt   DateTime?
-  finishedAt  DateTime?
-  createdAt   DateTime @default(now())
+  id           String    @id @default(uuid())
+  status       String    @default("PENDING")
+  filters      String?
+  totalItems   Int       @default(0)
+  indexedItems Int       @default(0)
+  errors       String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime  @default(now())
 
   @@index([status, createdAt])
   @@map("search_index_jobs")
@@ -568,45 +651,43 @@ model RiskAssessment {
   entityId  String
   score     Float
   level     String
-  reasons   String?  // JSON string
+  reasons   String?
   createdAt DateTime @default(now())
 
   @@index([entity, entityId, level])
   @@map("risk_assessments")
 }
 
-// ── Wishlist ──
 model WishlistItem {
   id        String   @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   productId String
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, productId])
   @@index([userId])
   @@map("wishlist_items")
 }
 
-// ── Coupons & Promotions ──
 model CouponRule {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   sellerId    String?
-  seller      Seller?  @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  code        String   @unique
-  type        String   // PERCENTAGE, FIXED_AMOUNT, FREE_SHIPPING
+  code        String    @unique
+  type        String
   value       Float
-  minSpend    Float    @default(0)
+  minSpend    Float     @default(0)
   maxDiscount Float?
   usageLimit  Int?
   userLimit   Int?
-  usedCount   Int      @default(0)
-  isActive    Boolean  @default(true)
+  usedCount   Int       @default(0)
+  isActive    Boolean   @default(true)
   startsAt    DateTime?
   expiresAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  seller      Seller?   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@index([code, isActive, expiresAt])
   @@map("coupon_rules")
@@ -623,22 +704,20 @@ model CouponUsage {
   @@map("coupon_usages")
 }
 
-// ── Campaigns ──
 model Campaign {
-  id            String   @id @default(uuid())
+  id            String            @id @default(uuid())
   name          String
-  slug          String   @unique
+  slug          String            @unique
   description   String?
   banner        String?
-  type          String   // FLASH_SALE, SEASONAL, VENDOR_DRIVEN
+  type          String
   discountType  String
   discountValue Float
   startAt       DateTime
   endAt         DateTime
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
+  isActive      Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
   products      CampaignProduct[]
 
   @@index([slug, isActive, startAt, endAt])
@@ -648,16 +727,15 @@ model Campaign {
 model CampaignProduct {
   id         String   @id @default(uuid())
   campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   productId  String
-  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
   createdAt  DateTime @default(now())
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, productId])
   @@map("campaign_products")
 }
 
-// ── Buyer-Seller Messaging ──
 model Conversation {
   id            String    @id @default(uuid())
   buyerId       String
@@ -667,7 +745,6 @@ model Conversation {
   lastMessageAt DateTime  @default(now())
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-
   buyer         User      @relation("BuyerConversations", fields: [buyerId], references: [id], onDelete: Cascade)
   seller        User      @relation("SellerConversations", fields: [sellerId], references: [id], onDelete: Cascade)
   messages      Message[]
@@ -677,34 +754,32 @@ model Conversation {
 }
 
 model Message {
-  id              String       @id @default(uuid())
-  conversationId  String
-  conversation    Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  senderId        String
-  sender          User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  content         String
-  attachments     String?      // JSON string
-  readAt          DateTime?
-  createdAt       DateTime     @default(now())
+  id             String       @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  attachments    String?
+  readAt         DateTime?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
   @@map("messages")
 }
 
-// ── Support Tickets ──
 model SupportTicket {
-  id          String        @id @default(uuid())
+  id          String                 @id @default(uuid())
   userId      String
   subject     String
   description String
-  priority    String        @default("MEDIUM")
-  status      String        @default("OPEN")
+  priority    String                 @default("MEDIUM")
+  status      String                 @default("OPEN")
   category    String?
   orderId     String?
   assignedTo  String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
   messages    SupportTicketMessage[]
 
   @@index([userId, status, priority])
@@ -712,130 +787,121 @@ model SupportTicket {
 }
 
 model SupportTicketMessage {
-  id        String        @id @default(uuid())
-  ticketId  String
-  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  userId    String
-  body      String
-  isStaff   Boolean       @default(false)
-  attachments String?     // JSON string
-  createdAt DateTime      @default(now())
+  id          String        @id @default(uuid())
+  ticketId    String
+  userId      String
+  body        String
+  isStaff     Boolean       @default(false)
+  attachments String?
+  createdAt   DateTime      @default(now())
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 
   @@index([ticketId, createdAt])
   @@map("support_ticket_messages")
 }
 
-// ── CMS / Blog ──
 model BlogPost {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   title       String
-  slug        String   @unique
+  slug        String    @unique
   excerpt     String?
   content     String
   coverImage  String?
   authorId    String
   authorName  String
   category    String?
-  tags        String?  // JSON string
-  status      String   @default("DRAFT")
+  tags        String?
+  status      String    @default("DRAFT")
   publishedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([slug, status, publishedAt])
   @@map("blog_posts")
 }
 
-// ── API Keys ──
 model ApiKey {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
-  key         String   @unique
+  key         String    @unique
   userId      String?
-  permissions String?  // JSON string
-  isActive    Boolean  @default(true)
+  permissions String?
+  isActive    Boolean   @default(true)
   lastUsedAt  DateTime?
   expiresAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([key, isActive])
   @@map("api_keys")
 }
 
-// ── Gift Cards / Store Credit ──
 model GiftCard {
-  id          String   @id @default(uuid())
-  code        String   @unique
-  amount      Float
-  balance     Float
-  currency    String   @default("TZS")
-  buyerId     String?
+  id             String          @id @default(uuid())
+  code           String          @unique
+  amount         Float
+  balance        Float
+  currency       String          @default("TZS")
+  buyerId        String?
   recipientEmail String?
   recipientName  String?
-  message     String?
-  isActive    Boolean  @default(true)
-  expiresAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  usages      GiftCardUsage[]
+  message        String?
+  isActive       Boolean         @default(true)
+  expiresAt      DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  usages         GiftCardUsage[]
 
   @@index([code, isActive])
   @@map("gift_cards")
 }
 
 model GiftCardUsage {
-  id        String   @id @default(uuid())
-  cardId    String
-  card      GiftCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
-  userId    String
-  orderId   String?
-  amount    Float
-  usedAt    DateTime @default(now())
+  id      String   @id @default(uuid())
+  cardId  String
+  userId  String
+  orderId String?
+  amount  Float
+  usedAt  DateTime @default(now())
+  card    GiftCard @relation(fields: [cardId], references: [id], onDelete: Cascade)
 
   @@index([cardId, userId])
   @@map("gift_card_usages")
 }
 
-// ── Announcements ──
 model Announcement {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   title     String
   body      String
-  type      String   @default("INFO") // INFO, WARNING, PROMOTION, MAINTENANCE
-  isActive  Boolean  @default(true)
+  type      String    @default("INFO")
+  isActive  Boolean   @default(true)
   startsAt  DateTime?
   expiresAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   @@index([isActive, type])
   @@map("announcements")
 }
 
-// ── Read Receipts ──
 model ReadReceipt {
-  id             String   @id @default(uuid())
-  userId         String
-  entityType     String   // notification, message
-  entityId       String
-  readAt         DateTime @default(now())
+  id         String   @id @default(uuid())
+  userId     String
+  entityType String
+  entityId   String
+  readAt     DateTime @default(now())
 
   @@unique([userId, entityType, entityId])
   @@map("read_receipts")
 }
 
-// ── Returns & Refunds ──
 model ReturnRequest {
   id           String       @id @default(uuid())
   orderId      String
-  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   userId       String
-  user         User         @relation(fields: [userId], references: [id])
   reason       String
   description  String?
-  images       String?      // JSON string
+  images       String?
   status       String       @default("PENDING")
   refundAmount Float?
   refundMethod String?
@@ -844,8 +910,9 @@ model ReturnRequest {
   completedAt  DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
-
   items        ReturnItem[]
+  order        Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([orderId, userId, status])
   @@map("return_requests")
@@ -854,68 +921,67 @@ model ReturnRequest {
 model ReturnItem {
   id              String        @id @default(uuid())
   returnRequestId String
-  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
   orderItemId     String
   quantity        Int           @default(1)
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
 
   @@map("return_items")
 }
 
-// ── Notifications ──
 model Notification {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   type      String
   title     String
   body      String?
-  data      String?  // JSON string
-  isRead    Boolean  @default(false)
+  data      String?
+  isRead    Boolean   @default(false)
   readAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead, createdAt])
   @@map("notifications")
 }
 
-// ── Loyalty & Referrals ──
 model LoyaltyTransaction {
   id        String   @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   points    Int
-  type      String   // EARNED, REDEEMED, EXPIRED
+  type      String
   reference String?
   createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([type])
   @@map("loyalty_transactions")
 }
 
 model Referral {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   referrerId   String
   refereeEmail String?
   refereePhone String?
-  status       String   // PENDING, JOINED, REWARDED
-  rewardPoints Int      @default(0)
-  createdAt    DateTime @default(now())
+  status       String
+  rewardPoints Int       @default(0)
+  createdAt    DateTime  @default(now())
   joinedAt     DateTime?
+
+  referrer     User      @relation(fields: [referrerId], references: [id], onDelete: Cascade)
 
   @@index([referrerId])
   @@map("referrals")
 }
 
-// ── Admin ──
 model AdminRole {
-  id          String   @id @default(uuid())
-  name        String   @unique
+  id          String      @id @default(uuid())
+  name        String      @unique
   description String?
-  permissions String?  // JSON string
-  isSystem    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  permissions String?
+  isSystem    Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
   users       AdminUser[]
 }
 
@@ -923,36 +989,34 @@ model AdminUser {
   id        String    @id @default(uuid())
   userId    String    @unique
   roleId    String
-  role      AdminRole @relation(fields: [roleId], references: [id])
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
+  role      AdminRole @relation(fields: [roleId], references: [id])
 
   @@index([userId, roleId])
   @@map("admin_users")
 }
 
-// ── Audit Log ──
 model AuditLog {
   id        String   @id @default(uuid())
   userId    String?
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   action    String
   entity    String
   entityId  String?
-  details   String?  // JSON string
+  details   String?
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
 
   @@index([userId, action, entity, createdAt])
   @@map("audit_logs")
 }
 
-// ── Feature Flags ──
 model FeatureFlag {
   id          String   @id @default(uuid())
   key         String   @unique
-  value       String   // JSON string
+  value       String
   type        String   @default("boolean")
   description String?
   isActive    Boolean  @default(true)
@@ -961,35 +1025,33 @@ model FeatureFlag {
   @@map("feature_flags")
 }
 
-// ── Plugin Registry ──
 model Plugin {
-  id            String   @id @default(uuid())
-  name          String   @unique
-  slug          String   @unique
-  description   String?
-  version       String
-  author        String?
-  homepage      String?
-  manifest      String   // JSON string – full plugin manifest
-  scopes        String   // JSON string – array of required permissions
-  webhookUrls   String   // JSON string – array of webhook URLs
-  settings      String?  // JSON string – plugin settings
-  isEnabled     Boolean  @default(false)
-  isSystem      Boolean  @default(false)
-  installedAt   DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id          String   @id @default(uuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  version     String
+  author      String?
+  homepage    String?
+  manifest    String
+  scopes      String
+  webhookUrls String
+  settings    String?
+  isEnabled   Boolean  @default(false)
+  isSystem    Boolean  @default(false)
+  installedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([slug, isEnabled])
   @@map("plugins")
 }
 
-// ── Webhook Event Bus ──
 model WebhookEvent {
   id          String    @id @default(uuid())
   eventType   String
-  source      String    // plugin slug, system module name
-  payload     String    // JSON string
-  status      String    @default("PENDING") // PENDING, PROCESSING, DELIVERED, FAILED
+  source      String
+  payload     String
+  status      String    @default("PENDING")
   attempts    Int       @default(0)
   maxAttempts Int       @default(3)
   lastError   String?
@@ -1000,107 +1062,102 @@ model WebhookEvent {
   @@map("webhook_events")
 }
 
-// ── AI Provider Config ──
 model AiProvider {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  slug        String   @unique
-  provider    String   // openai, anthropic, google, azure, custom
-  baseUrl     String?
-  apiKey      String?
-  models      String   // JSON string – array of model IDs
-  config      String?  // JSON string – extra provider config
-  isEnabled   Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  aiModels    AiModel[]
+  id        String    @id @default(uuid())
+  name      String    @unique
+  slug      String    @unique
+  provider  String
+  baseUrl   String?
+  apiKey    String?
+  models    String
+  config    String?
+  isEnabled Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  aiModels  AiModel[]
 
   @@index([slug, isEnabled])
   @@map("ai_providers")
 }
 
-// ── Model Registry ──
 model AiModel {
-  id            String   @id @default(uuid())
+  id            String     @id @default(uuid())
   name          String
-  slug          String   @unique
+  slug          String     @unique
   providerId    String
+  capabilities  String
+  contextLength Int        @default(4096)
+  pricing       String?
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
   provider      AiProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
-  capabilities  String   // JSON string – e.g. ["chat","completion","embedding","vision"]
-  contextLength Int      @default(4096)
-  pricing       String?  // JSON string – { input: 0.01, output: 0.03 }
-  isActive      Boolean  @default(true)
-  createdAt     DateTime @default(now())
 
   @@index([providerId, slug, isActive])
   @@map("ai_models")
 }
 
-// ── AI Capability Registry ──
 model AiTool {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String
-  category    String   @default("builtin") // builtin, plugin, workflow, webhook
-  jsonSchema  String?  // JSON string – JSON Schema for parameter validation
-  enabled     Boolean  @default(true)
-  roles       String?  // JSON string – array of roles allowed to use this tool
-  scopes      String?  // JSON string – permission scopes required
-  riskLevel   String   @default("low") // low, medium, high, critical
-  requiresConfirmation Boolean @default(false)
-  handlerType String   @default("builtin") // builtin, plugin, workflow, webhook
-  handlerRef  String?  // reference to plugin slug, workflow slug, or webhook URL
-  config      String?  // JSON string – additional handler configuration
-  rateLimit   String?  // JSON string – { perMinute: 10, perHour: 100 }
-  auditLevel  String   @default("standard") // none, standard, verbose
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-permissions AiToolPermission[]
+  id                   String             @id @default(uuid())
+  name                 String             @unique
+  description          String
+  category             String             @default("builtin")
+  jsonSchema           String?
+  enabled              Boolean            @default(true)
+  roles                String?
+  scopes               String?
+  riskLevel            String             @default("low")
+  requiresConfirmation Boolean            @default(false)
+  handlerType          String             @default("builtin")
+  handlerRef           String?
+  config               String?
+  rateLimit            String?
+  auditLevel           String             @default("standard")
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  permissions          AiToolPermission[]
 
   @@index([name, enabled, category])
   @@map("ai_tools")
 }
 
 model AiToolPermission {
-  id        String   @id @default(uuid())
-  toolId    String
-  tool      AiTool  @relation(fields: [toolId], references: [id], onDelete: Cascade)
-  role      String   // CUSTOMER, SELLER, ADMIN, SUPER_ADMIN
+  id         String   @id @default(uuid())
+  toolId     String
+  role       String
   canExecute Boolean  @default(true)
-  canApprove Boolean  @default(false) // can approve high-risk tool calls
-  createdAt DateTime @default(now())
+  canApprove Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  tool       AiTool   @relation(fields: [toolId], references: [id], onDelete: Cascade)
 
   @@unique([toolId, role])
   @@map("ai_tool_permissions")
 }
 
 model AiPromptProfile {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  description String?
+  id           String   @id @default(uuid())
+  name         String   @unique
+  description  String?
   systemPrompt String
-  roles       String?  // JSON string – which roles use this profile
-  isActive    Boolean  @default(true)
-  metadata    String?  // JSON string – version, tags, etc.
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  roles        String?
+  isActive     Boolean  @default(true)
+  metadata     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@map("ai_prompt_profiles")
 }
 
 model AiKnowledgeSource {
-  id          String   @id @default(uuid())
-  title       String
-  content     String   // Full text content
-  category    String   @default("general")
-  embedding   String?  // JSON string – vector embedding
-  enabled     Boolean  @default(true)
-  roles       String?  // JSON string – which roles can access
-  metadata    String?  // JSON string – source, tags, etc.
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  category  String   @default("general")
+  embedding String?
+  enabled   Boolean  @default(true)
+  roles     String?
+  metadata  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([category, enabled])
   @@map("ai_knowledge_sources")
@@ -1111,8 +1168,8 @@ model AiAgentProfile {
   name            String   @unique
   description     String?
   systemPrompt    String
-  allowedTools    String?  // JSON string – array of tool names
-  allowedRoles    String?  // JSON string – array of roles
+  allowedTools    String?
+  allowedRoles    String?
   maxTokens       Int      @default(4096)
   temperature     Float    @default(0.7)
   requireApproval Boolean  @default(false)
@@ -1124,37 +1181,35 @@ model AiAgentProfile {
 }
 
 model AiToolAuditLog {
-  id          String   @id @default(uuid())
-  toolId      String?
-  toolName    String
-  userId      String?  // references User.id
-  userRole    String?
-  arguments   String?  // JSON string
-  result      String?  // JSON string
-  riskLevel   String   @default("low")
-  approvedBy  String?
-  status      String   @default("executed") // pending, executed, denied, error
-  ipAddress   String?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(uuid())
+  toolId     String?
+  toolName   String
+  userId     String?
+  userRole   String?
+  arguments  String?
+  result     String?
+  riskLevel  String   @default("low")
+  approvedBy String?
+  status     String   @default("executed")
+  ipAddress  String?
+  createdAt  DateTime @default(now())
 
   @@index([toolName, userId, createdAt])
   @@map("ai_tool_audit_logs")
 }
 
-// ── Workflow Engine ──
 model WorkflowTemplate {
-  id          String   @id @default(uuid())
+  id          String        @id @default(uuid())
   name        String
-  slug        String   @unique
+  slug        String        @unique
   description String?
-  category    String   @default("automation")
-  steps       String   // JSON string – ordered array of step definitions
-  triggers    String   // JSON string – array of trigger event types
-  config      String?  // JSON string – template-level config
-  isEnabled   Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
+  category    String        @default("automation")
+  steps       String
+  triggers    String
+  config      String?
+  isEnabled   Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
   runs        WorkflowRun[]
 
   @@index([slug, category, isEnabled])
@@ -1162,76 +1217,72 @@ model WorkflowTemplate {
 }
 
 model WorkflowRun {
-  id            String            @id @default(uuid())
-  templateId    String
-  template      WorkflowTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  triggeredBy   String?           // event type or user ID
-  input         String?           // JSON string
-  output        String?           // JSON string
-  status        String            @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED, CANCELLED
-  error         String?
-  startedAt     DateTime?
-  completedAt   DateTime?
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-
-  steps         WorkflowStepRun[]
+  id          String            @id @default(uuid())
+  templateId  String
+  triggeredBy String?
+  input       String?
+  output      String?
+  status      String            @default("PENDING")
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  template    WorkflowTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  steps       WorkflowStepRun[]
 
   @@index([templateId, status, createdAt])
   @@map("workflow_runs")
 }
 
 model WorkflowStepRun {
-  id          String        @id @default(uuid())
+  id          String      @id @default(uuid())
   runId       String
-  run         WorkflowRun   @relation(fields: [runId], references: [id], onDelete: Cascade)
   stepIndex   Int
-  stepDef     String        // JSON string – snapshot of step definition at run time
-  status      String        @default("PENDING")
-  input       String?       // JSON string
-  output      String?       // JSON string
-  retryCount  Int           @default(0)
-  maxRetries  Int           @default(3)
+  stepDef     String
+  status      String      @default("PENDING")
+  input       String?
+  output      String?
+  retryCount  Int         @default(0)
+  maxRetries  Int         @default(3)
   error       String?
   startedAt   DateTime?
   completedAt DateTime?
-  createdAt   DateTime      @default(now())
+  createdAt   DateTime    @default(now())
+  run         WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([runId, stepIndex])
   @@map("workflow_step_runs")
 }
 
-// ── Static Pages / CMS ──
 model StaticPage {
-  id          String   @id @default(uuid())
+  id          String    @id @default(uuid())
   title       String
-  slug        String   @unique
+  slug        String    @unique
   content     String
   excerpt     String?
   coverImage  String?
   authorId    String?
   authorName  String?
-  category    String   @default("page") // page, about, policy, terms, faq, contact
-  status      String   @default("DRAFT") // DRAFT, PUBLISHED
-  isPublished Boolean  @default(false)
+  category    String    @default("page")
+  status      String    @default("DRAFT")
+  isPublished Boolean   @default(false)
   publishedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([slug, status, category, isPublished])
   @@map("static_pages")
 }
 
-// ── Chatbot / Conversations ──
 model ChatConversation {
   id        String        @id @default(uuid())
   userId    String?
   title     String?
-  status    String        @default("ACTIVE") // ACTIVE, ARCHIVED
-  metadata  String?       // JSON string
+  status    String        @default("ACTIVE")
+  metadata  String?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
-
   messages  ChatMessage[]
 
   @@index([userId, status, createdAt])
@@ -1239,17 +1290,1020 @@ model ChatConversation {
 }
 
 model ChatMessage {
-  id              String           @id @default(uuid())
-  conversationId  String
-  conversation    ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  role            String           // user, assistant, system, tool
-  content         String
-  toolCalls       String?          // JSON string – array of tool call objects
-  toolResults     String?          // JSON string – array of tool results
-  tokens          Int?             // token count
-  model           String?          // model used for this message
-  createdAt       DateTime         @default(now())
+  id             String           @id @default(uuid())
+  conversationId String
+  role           String
+  content        String
+  toolCalls      String?
+  toolResults    String?
+  tokens         Int?
+  model          String?
+  createdAt      DateTime         @default(now())
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
   @@map("chat_messages")
+}
+
+model CurrencyRate {
+  id              String    @id @default(uuid())
+  fromCurrency    String
+  toCurrency      String
+  rate            Float
+  provider        String    @default("manual")
+  autoRefresh     Boolean   @default(true)
+  refreshInterval Int       @default(3600)
+  lastRefreshedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([fromCurrency, toCurrency])
+  @@index([fromCurrency, toCurrency])
+  @@map("currency_rates")
+}
+
+model CurrencySettings {
+  id                  String   @id @default(uuid())
+  baseCurrency        String   @default("USD")
+  displayCurrencies   String   @default("[\"USD\",\"EUR\",\"GBP\",\"TZS\"]")
+  autoRefresh         Boolean  @default(true)
+  refreshInterval     Int      @default(3600)
+  roundingDecimals    Int      @default(2)
+  symbolPosition      String   @default("before")
+  thousandSeparator   String   @default(",")
+  decimalSeparator    String   @default(".")
+  provider            String   @default("manual")
+  apiKey              String?  @map("api_key")
+  geoDetectionEnabled Boolean  @default(false) @map("geo_detection_enabled")
+  geolocationProvider String   @default("ipapi") @map("geolocation_provider")
+  updatedAt           DateTime @updatedAt
+
+  @@map("currency_settings")
+}
+
+model AnalyticsEvent {
+  id        String   @id @default(uuid())
+  name      String
+  category  String   @default("general")
+  label     String?
+  value     Float?
+  userId    String?
+  sessionId String?
+  metadata  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([name, createdAt])
+  @@index([category, createdAt])
+  @@map("analytics_events")
+}
+
+model DashboardWidget {
+  id        String   @id @default(uuid())
+  title     String
+  type      String
+  config    String   @default("{}")
+  size      String   @default("medium")
+  position  Int      @default(0)
+  role      String   @default("ADMIN")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role, isActive])
+  @@map("dashboard_widgets")
+}
+
+model ReportTemplate {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  type        String
+  config      String   @default("{}")
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type, isActive])
+  @@map("report_templates")
+}
+
+model AssetFamily {
+  id           String       @id @default(uuid())
+  name         String
+  slug         String       @unique
+  description  String?
+  allowedTypes String       @default("[\"image\",\"video\",\"document\",\"audio\",\"other\"]")
+  maxFileSize  Int          @default(10485760)
+  isActive     Boolean      @default(true)
+  sortOrder    Int          @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  groups       AssetGroup[]
+  assets       Asset[]
+
+  @@index([slug, isActive])
+  @@map("asset_families")
+}
+
+model AssetGroup {
+  id          String      @id @default(uuid())
+  name        String
+  familyId    String
+  description String?
+  coverImage  String?
+  isActive    Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  metadata    String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  family      AssetFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  assets      Asset[]
+
+  @@index([familyId, isActive])
+  @@map("asset_groups")
+}
+
+model Asset {
+  id           String       @id @default(uuid())
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  url          String
+  thumbnailUrl String?
+  alt          String?
+  description  String?
+  width        Int?
+  height       Int?
+  duration     Float?
+  entityType   String?
+  entityId     String?
+  familyId     String?
+  groupId      String?
+  userId       String?
+  metadata     String?
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  family       AssetFamily? @relation(fields: [familyId], references: [id])
+  group        AssetGroup?  @relation(fields: [groupId], references: [id])
+
+  @@index([familyId])
+  @@index([groupId])
+  @@index([userId])
+  @@index([mimeType])
+  @@index([entityType])
+  @@map("assets")
+}
+
+model BusinessAccount {
+  id               String          @id @default(uuid())
+  userId           String          @unique
+  companyName      String
+  companyRegNumber String?
+  taxId            String?
+  industry         String?
+  website          String?
+  phone            String?
+  address          String?
+  creditLimit      Float           @default(0)
+  paymentTerms     String          @default("NET30")
+  status           String          @default("PENDING")
+  approvedAt       DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purchaseOrders   PurchaseOrder[]
+  quoteRequests    QuoteRequest[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("business_accounts")
+}
+
+model BulkPricingTier {
+  id          String   @id @default(uuid())
+  productId   String
+  minQuantity Int
+  maxQuantity Int?
+  price       Float
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([productId, isActive])
+  @@map("bulk_pricing_tiers")
+}
+
+model PurchaseOrder {
+  id                String          @id @default(uuid())
+  poNumber          String          @unique
+  businessAccountId String
+  sellerId          String?
+  status            String          @default("DRAFT")
+  subtotal          Float           @default(0)
+  taxAmount         Float           @default(0)
+  totalAmount       Float           @default(0)
+  notes             String?
+  approvedBy        String?
+  approvedAt        DateTime?
+  expectedDelivery  DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+
+  @@index([businessAccountId])
+  @@index([status])
+  @@map("purchase_orders")
+}
+
+model QuoteRequest {
+  id                String          @id @default(uuid())
+  businessAccountId String
+  sellerId          String
+  productId         String?
+  quantity          Int?
+  notes             String?
+  status            String          @default("PENDING")
+  respondedAt       DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  businessAccount   BusinessAccount @relation(fields: [businessAccountId], references: [id], onDelete: Cascade)
+
+  @@index([businessAccountId])
+  @@index([sellerId, status])
+  @@map("quote_requests")
+}
+
+model BadgeType {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  slug        String      @unique
+  description String?
+  icon        String?
+  color       String      @default("#6B7280")
+  category    String      @default("general")
+  criteria    String?
+  isActive    Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  userBadges  UserBadge[]
+
+  @@index([slug, isActive])
+  @@map("badge_types")
+}
+
+model UserBadge {
+  id          String    @id @default(uuid())
+  userId      String
+  badgeTypeId String
+  awardedBy   String?
+  reason      String?
+  isVisible   Boolean   @default(true)
+  awardedAt   DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  badgeType   BadgeType @relation(fields: [badgeTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, badgeTypeId])
+  @@index([userId])
+  @@index([badgeTypeId])
+  @@map("user_badges")
+}
+
+model CacheConfig {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String   @default("")
+  type        String   @default("string")
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("cache_configs")
+}
+
+model QueueMonitor {
+  id              String    @id @default(uuid())
+  name            String
+  type            String    @default("default")
+  status          String    @default("IDLE")
+  pendingCount    Int       @default(0)
+  processingCount Int       @default(0)
+  failedCount     Int       @default(0)
+  completedCount  Int       @default(0)
+  lastRunAt       DateTime?
+  lastError       String?
+  isActive        Boolean   @default(true)
+  config          String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("queue_monitors")
+}
+
+model RateLimitRule {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  route       String
+  method      String   @default("ALL")
+  maxRequests Int      @default(100)
+  windowMs    Int      @default(60000)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("rate_limit_rules")
+}
+
+model DeliveryPerson {
+  id                 String    @id @default(uuid())
+  userId             String    @unique
+  phone              String?
+  vehicleType        String    @default("motorcycle")
+  vehicleReg         String?
+  serviceZone        String?
+  isActive           Boolean   @default(true)
+  isAvailable        Boolean   @default(true)
+  rating             Float     @default(5.0)
+  totalDeliveries    Int       @default(0)
+  latitude           Float?
+  longitude          Float?
+  lastLocationUpdate DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([isActive, isAvailable])
+  @@map("delivery_persons")
+}
+
+model AbandonedCart {
+  id                 String    @id @default(uuid())
+  userId             String
+  cartData           String    @default("{}")
+  totalAmount        Float     @default(0)
+  emailSent          Boolean   @default(false)
+  emailSentAt        DateTime?
+  recovered          Boolean   @default(false)
+  recoveredAt        DateTime?
+  recoveryOrderId    String?
+  reminderCount      Int       @default(0)
+  lastReminderSentAt DateTime?
+  abandonedAt        DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([recovered, emailSent])
+  @@map("abandoned_carts")
+}
+
+model ExportJob {
+  id          String    @id @default(uuid())
+  userId      String?
+  type        String
+  format      String    @default("csv")
+  filters     String?
+  status      String    @default("PENDING")
+  progress    Int       @default(0)
+  fileUrl     String?
+  fileSize    Int?
+  error       String?
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("export_jobs")
+}
+
+model PayoutBatch {
+  id             String    @id @default(uuid())
+  name           String
+  status         String    @default("PENDING")
+  totalAmount    Float     @default(0)
+  totalSellers   Int       @default(0)
+  processedCount Int       @default(0)
+  failedCount    Int       @default(0)
+  notes          String?
+  processedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status])
+  @@map("payout_batches")
+}
+
+model CommissionRule {
+  id         String    @id @default(uuid())
+  name       String
+  type       String    @default("PERCENTAGE")
+  value      Float     @default(0)
+  minAmount  Float     @default(0)
+  maxAmount  Float?
+  categoryId String?
+  sellerId   String?
+  isActive   Boolean   @default(true)
+  startsAt   DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([isActive])
+  @@map("commission_rules")
+}
+
+model ProductBundle {
+  id              String              @id @default(uuid())
+  name            String
+  slug            String              @unique
+  description     String?
+  image           String?
+  discountType    String              @default("PERCENTAGE")
+  discountValue   Float               @default(0)
+  totalPrice      Float?
+  discountedPrice Float?
+  isActive        Boolean             @default(true)
+  startsAt        DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  items           ProductBundleItem[]
+
+  @@index([slug, isActive])
+  @@map("product_bundles")
+}
+
+model ProductBundleItem {
+  id        String        @id @default(uuid())
+  bundleId  String
+  productId String
+  quantity  Int           @default(1)
+  sortOrder Int           @default(0)
+  bundle    ProductBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+
+  @@unique([bundleId, productId])
+  @@index([bundleId])
+  @@map("product_bundle_items")
+}
+
+model SiteLanguage {
+  id         String   @id @default(uuid())
+  code       String   @unique
+  name       String
+  nativeName String?
+  isRtl      Boolean  @default(false)
+  isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  flagUrl    String?
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([code, isActive])
+  @@map("site_languages")
+}
+
+model TranslationKey {
+  id          String             @id @default(uuid())
+  key         String             @unique
+  group       String
+  description String?
+  createdAt   DateTime           @default(now())
+  values      TranslationValue[]
+
+  @@index([group])
+  @@map("translation_keys")
+}
+
+model TranslationValue {
+  id               String         @id @default(uuid())
+  translationKeyId String
+  language         String
+  value            String
+  updatedAt        DateTime       @updatedAt
+  translationKey   TranslationKey @relation(fields: [translationKeyId], references: [id], onDelete: Cascade)
+
+  @@unique([translationKeyId, language])
+  @@index([language])
+  @@map("translation_values")
+}
+
+model ProviderAdapter {
+  id           String               @id @default(uuid())
+  name         String
+  provider     String
+  baseUrl      String?
+  methods      String               @default("[]")
+  configSchema String?
+  isEnabled    Boolean              @default(true)
+  isActive     Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  connections  ProviderConnection[]
+
+  @@index([provider, isEnabled])
+  @@map("provider_adapters")
+}
+
+model ProviderConnection {
+  id          String              @id @default(uuid())
+  adapterId   String
+  name        String
+  credentials String?
+  config      String?
+  isActive    Boolean             @default(true)
+  isVerified  Boolean             @default(false)
+  lastSyncAt  DateTime?
+  lastError   String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  adapter     ProviderAdapter     @relation(fields: [adapterId], references: [id], onDelete: Cascade)
+  importJobs  DropshipImportJob[]
+
+  @@index([adapterId, isActive])
+  @@map("provider_connections")
+}
+
+model DropshipSupplier {
+  id          String                   @id @default(uuid())
+  name        String
+  provider    String
+  storeUrl    String?
+  apiEndpoint String?
+  apiKey      String?
+  apiSecret   String?
+  currency    String                   @default("USD")
+  isVerified  Boolean                  @default(false)
+  isActive    Boolean                  @default(true)
+  metadata    String?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+  mappings    DropshipProductMapping[]
+  orders      DropshipOrder[]
+  jobs        DropshipImportJob[]
+
+  @@index([provider, isActive])
+  @@map("dropship_suppliers")
+}
+
+model DropshipProductMapping {
+  id                String           @id @default(uuid())
+  supplierId        String
+  localProductId    String?
+  supplierSku       String           @unique
+  supplierProductId String?
+  supplierTitle     String
+  supplierPrice     Float            @default(0)
+  supplierCurrency  String           @default("USD")
+  costPrice         Float            @default(0)
+  sellingPrice      Float            @default(0)
+  quantity          Int              @default(0)
+  supplierUrl       String?
+  imageUrl          String?
+  category          String?
+  specifications    String?
+  autoSync          Boolean          @default(true)
+  lastSyncedAt      DateTime?
+  isActive          Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  supplier          DropshipSupplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId, isActive])
+  @@map("dropship_product_mappings")
+}
+
+model DropshipOrder {
+  id              String           @id @default(uuid())
+  supplierId      String
+  localOrderId    String?
+  supplierOrderId String
+  items           String
+  subtotal        Float            @default(0)
+  shippingCost    Float            @default(0)
+  totalCost       Float            @default(0)
+  currency        String           @default("USD")
+  status          String           @default("PENDING")
+  estimatedDays   Int?
+  trackingUrl     String?
+  errorLog        String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  supplier        DropshipSupplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId, status])
+  @@map("dropship_orders")
+}
+
+model DropshipImportJob {
+  id              String              @id @default(uuid())
+  supplierId      String?
+  connectionId    String?
+  status          String              @default("PENDING")
+  totalItems      Int                 @default(0)
+  imported        Int                 @default(0)
+  failed          Int                 @default(0)
+  errors          String?
+  mappingTemplate String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  supplier        DropshipSupplier?   @relation(fields: [supplierId], references: [id])
+  connection      ProviderConnection? @relation(fields: [connectionId], references: [id])
+
+  @@index([supplierId, status])
+  @@map("dropship_import_jobs")
+}
+
+model WebhookEndpoint {
+  id        String   @id @default(uuid())
+  url       String
+  events    String
+  headers   String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@map("webhook_endpoints")
+}
+
+model DropshipApplication {
+  id         String    @id @default(uuid())
+  sellerId   String
+  status     String    @default("PENDING")
+  metadata   String?
+  adminNotes String?
+  reviewedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  seller     Seller    @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@index([sellerId, status])
+  @@map("dropship_applications")
+}
+
+model DropshipFulfillment {
+  id              String    @id @default(uuid())
+  orderId         String?
+  supplierOrderId String?
+  status          String    @default("PENDING")
+  items           String
+  trackingNumber  String?
+  carrierCode     String?
+  estimatedDays   Int?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
+  errorLog        String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([orderId, status])
+  @@map("dropship_fulfillments")
+}
+
+model DropshipSyncJob {
+  id           String    @id @default(uuid())
+  connectionId String?
+  supplierId   String?
+  type         String
+  status       String    @default("PENDING")
+  totalItems   Int       @default(0)
+  syncedItems  Int       @default(0)
+  failedItems  Int       @default(0)
+  errors       String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([connectionId, type, status])
+  @@map("dropship_sync_jobs")
+}
+
+model DropshipInventoryAlert {
+  id         String    @id @default(uuid())
+  mappingId  String
+  type       String
+  threshold  Int?
+  notifiedAt DateTime?
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([mappingId, type])
+  @@map("dropship_inventory_alerts")
+}
+
+model DropshipBackInStock {
+  id        String   @id @default(uuid())
+  mappingId String
+  userId    String
+  email     String
+  notified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([mappingId, userId])
+  @@map("dropship_back_in_stock")
+}
+
+model DropshipPricingRule {
+  id             String    @id @default(uuid())
+  name           String
+  description    String?
+  ruleType       String
+  value          Float
+  priority       Int       @default(0)
+  appliesTo      String
+  appliesToId    String?
+  scheduleStart  DateTime?
+  scheduleEnd    DateTime?
+  minStock       Int?
+  maxStock       Int?
+  customerGroups String?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([isActive, priority])
+  @@map("dropship_pricing_rules")
+}
+
+model DropshipPriceChange {
+  id        String   @id @default(uuid())
+  mappingId String
+  oldPrice  Float
+  newPrice  Float
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([mappingId, createdAt])
+  @@map("dropship_price_changes")
+}
+
+model DropshipShippingZone {
+  id                    String   @id @default(uuid())
+  name                  String
+  countries             String
+  baseRate              Float
+  perKgRate             Float
+  freeShippingThreshold Float?
+  estimatedMinDays      Int
+  estimatedMaxDays      Int
+  carriers              String
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@map("dropship_shipping_zones")
+}
+
+model DropshipTracking {
+  id                String    @id @default(uuid())
+  orderId           String?
+  dropshipOrderId   String?
+  carrierCode       String
+  trackingNumber    String
+  status            String    @default("PENDING")
+  estimatedDelivery DateTime?
+  events            String
+  lastCheckedAt     DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([trackingNumber, carrierCode])
+  @@map("dropship_trackings")
+}
+
+model DropshipLabel {
+  id              String   @id @default(uuid())
+  dropshipOrderId String
+  carrierCode     String
+  trackingNumber  String
+  labelUrl        String
+  cost            Float
+  currency        String   @default("USD")
+  createdAt       DateTime @default(now())
+
+  @@map("dropship_labels")
+}
+
+model DropshipReturn {
+  id               String               @id @default(uuid())
+  orderId          String
+  userId           String
+  supplierId       String?
+  status           String               @default("PENDING")
+  reason           String
+  description      String?
+  evidence         String?
+  refundAmount     Float?
+  refundMethod     String?
+  restockingFee    Float                @default(0)
+  returnWindowDays Int?
+  adminNotes       String?
+  disputeStatus    String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  items            DropshipReturnItem[]
+
+  @@index([orderId, userId, status])
+  @@map("dropship_returns")
+}
+
+model DropshipReturnItem {
+  id           String         @id @default(uuid())
+  returnId     String
+  mappingId    String?
+  productTitle String
+  quantity     Int
+  unitPrice    Float
+  refundAmount Float?
+  condition    String?
+  return       DropshipReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@map("dropship_return_items")
+}
+
+model DropshipPayout {
+  id          String    @id @default(uuid())
+  supplierId  String
+  amount      Float
+  currency    String    @default("USD")
+  fee         Float     @default(0)
+  netAmount   Float
+  status      String    @default("PENDING")
+  method      String
+  reference   String?
+  periodStart DateTime?
+  periodEnd   DateTime?
+  paidAt      DateTime?
+  errorLog    String?
+  createdAt   DateTime  @default(now())
+
+  @@index([supplierId, status])
+  @@map("dropship_payouts")
+}
+
+model DropshipInvoice {
+  id            String    @id @default(uuid())
+  invoiceNumber String    @unique
+  supplierId    String
+  orderId       String?
+  items         String
+  subtotal      Float
+  shippingCost  Float
+  platformFee   Float
+  taxAmount     Float
+  totalAmount   Float
+  currency      String    @default("USD")
+  status        String    @default("DRAFT")
+  dueDate       DateTime?
+  paidAt        DateTime?
+  pdfUrl        String?
+  createdAt     DateTime  @default(now())
+
+  @@index([supplierId, status])
+  @@map("dropship_invoices")
+}
+
+model DropshipCommission {
+  id             String   @id @default(uuid())
+  orderId        String
+  supplierId     String?
+  amount         Float
+  percentage     Float
+  fixedFee       Float    @default(0)
+  transactionFee Float    @default(0)
+  totalFee       Float
+  currency       String   @default("USD")
+  status         String   @default("PENDING")
+  createdAt      DateTime @default(now())
+
+  @@index([orderId])
+  @@map("dropship_commissions")
+}
+
+model DropshipEscrow {
+  id            String    @id @default(uuid())
+  orderId       String
+  amount        Float
+  currency      String    @default("USD")
+  status        String    @default("HELD")
+  heldAt        DateTime  @default(now())
+  releasedAt    DateTime?
+  autoReleaseAt DateTime?
+
+  @@map("dropship_escrows")
+}
+
+model DropshipTaxRule {
+  id        String   @id @default(uuid())
+  country   String
+  region    String?
+  rate      Float
+  type      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([country, region])
+  @@map("dropship_tax_rules")
+}
+
+model DropshipAutomation {
+  id            String    @id @default(uuid())
+  name          String
+  trigger       String
+  triggerConfig String
+  actions       String
+  conditions    String?
+  isActive      Boolean   @default(true)
+  lastRunAt     DateTime?
+  runCount      Int       @default(0)
+  failCount     Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([trigger, isActive])
+  @@map("dropship_automations")
+}
+
+model DropshipRoutingRule {
+  id         String   @id @default(uuid())
+  name       String
+  strategy   String
+  priority   Int      @default(0)
+  conditions String?
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  @@map("dropship_routing_rules")
+}
+
+model SubscriptionPlan {
+  id            String         @id @default(uuid())
+  name          String
+  slug          String         @unique
+  description   String?
+  price         Float          @default(0)
+  currency      String         @default("TZS")
+  interval      String         @default("MONTHLY")
+  trialDays     Int            @default(0)
+  sortOrder     Int            @default(0)
+  features      String?
+  benefits      String?
+  metadata      String?
+  isActive      Boolean        @default(true)
+  isFeatured    Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  subscriptions Subscription[]
+
+  @@index([slug, isActive, sortOrder])
+  @@map("subscription_plans")
+}
+
+model Subscription {
+  id                 String           @id @default(uuid())
+  userId             String
+  planId             String
+  status             String           @default("ACTIVE")
+  provider           String?
+  externalId         String?
+  currentPeriodStart DateTime         @default(now())
+  currentPeriodEnd   DateTime?
+  trialEndsAt        DateTime?
+  cancelAtPeriodEnd  Boolean          @default(false)
+  canceledAt         DateTime?
+  metadata           String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan               SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, externalId])
+  @@index([userId, status])
+  @@index([planId, status])
+  @@map("subscriptions")
+}
+
+model ShippingProfile {
+  id          String    @id @default(uuid())
+  sellerId    String?
+  name        String
+  description String?
+  rules       String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  seller      Seller?   @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  products    Product[]
+
+  @@index([sellerId, isActive])
+  @@map("shipping_profiles")
 }

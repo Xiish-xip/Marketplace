@@ -37,6 +37,16 @@ export const createProviderSession = asyncHandler(async (req: Request, res: Resp
   res.status(201).json({ success: true, data: session });
 });
 
+export const complete = asyncHandler(async (req: Request, res: Response) => {
+  const payment = await paymentService.completePayment(req.params.id);
+  res.json({ success: true, data: payment });
+});
+
+export const refund = asyncHandler(async (req: Request, res: Response) => {
+  const payment = await paymentService.refundPayment(req.params.id, req.body?.amount);
+  res.json({ success: true, data: payment });
+});
+
 export const webhook = asyncHandler(async (req: Request, res: Response) => {
   // Determine signature from provider-specific headers
   const provider = req.params.provider;
@@ -52,6 +62,6 @@ export const webhook = asyncHandler(async (req: Request, res: Response) => {
     signature = req.headers['x-marketplace-signature'] as string | undefined;
   }
 
-  const result = await paymentService.handleWebhook(req.body, signature, provider);
+  const result = await paymentService.handleWebhook(req.body, signature, provider, (req as any).rawBody);
   res.json({ success: true, ...result });
 });

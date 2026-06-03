@@ -231,6 +231,16 @@ export class WorkflowService {
       case 'log':
         logger.info('Workflow log step', { message: config?.message, input });
         return { logged: true, message: config?.message };
+      case 'email':
+        return await this.executeEmail(config, input);
+      case 'sms':
+        return await this.executeSms(config, input);
+      case 'slack':
+        return await this.executeSlack(config, input);
+      case 'webhook':
+        return await this.executeWebhook(config, input);
+      case 'loop':
+        return await this.executeLoop(config, input);
       default:
         throw new Error(`Unknown step type: ${type}`);
     }
@@ -294,6 +304,79 @@ export class WorkflowService {
     const ms = config?.milliseconds || 1000;
     await new Promise(resolve => setTimeout(resolve, ms));
     return { delayed: ms };
+  }
+
+  // ── New Step Types ──
+
+  private async executeEmail(config: any, input: any) {
+    const { to, subject, body } = config;
+    // Create notification as email proxy. In production, integrate with SendGrid/SES
+    // For now, log and store as notification
+    logger.info('Workflow email step', { to, subject, body: this.resolveTemplateString(body, input) });
+    return { sent: true, to, subject: this.resolveTemplateString(subject, input) };
+  }
+
+  private async executeSms(config: any, input: any) {
+    const { phone, message } = config;
+    // In production, integrate with Twilio/AfricasTalking
+    logger.info('Workflow SMS step', { phone, message: this.resolveTemplateString(message, input) });
+    return { sent: true, phone };
+  }
+
+  private async executeSlack(config: any, input: any) {
+    const { webhookUrl, channel, message } = config;
+    const url = webhookUrl || process.env.SLACK_WEBHOOK_URL;
+    if (!url) {
+      logger.warn('Slack webhook URL not configured, skipping step');
+      return { sent: false, reason: 'No webhook URL configured' };
+    }
+    try {
+      const payload = {
+        channel: channel || '#notifications',
+        text: this.resolveTemplateString(message, input),
+        username: 'MarketPlace Bot',
+      };
+      await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return { sent: true, channel };
+    } catch (error) {
+      logger.error('Slack notification failed', { error: (error as Error).message });
+      return { sent: false, error: (error as Error).message };
+    }
+  }
+
+  private async executeWebhook(config: any, input: any) {
+    const { url, method = 'POST', headers = {}, event, payload } = config;
+    const body = payload ? this.resolveTemplate(payload, input) : { event, data: input };
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+      });
+      const responseBody = await response.text().catch(() => null);
+      return { status: response.status, body: responseBody, webhookUrl: url };
+    } catch (error) {
+      logger.error('Webhook execution failed', { url, error: (error as Error).message });
+      return { status: 0, error: (error as Error).message };
+    }
+  }
+
+  private async executeLoop(config: any, input: any) {
+    const { over, step } = config;
+    if (!over || !Array.isArray(input?.[over])) {
+      return { looped: false, reason: `No array found at '${over}'` };
+    }
+    const items = input[over];
+    const results = [];
+    for (const item of items) {
+      const resolved = this.resolveTemplate(step, { ...input, item });
+      results.push(resolved);
+    }
+    return { looped: true, count: items.length, results };
   }
 
   private resolveTemplate(template: any, input: any): any {

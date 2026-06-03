@@ -71,6 +71,12 @@ export class CartService {
       throw new AppError(400, 'Product is not available');
     }
 
+    if (!data.variantId && product.variants.length) {
+      const firstInStock = product.variants.find((variant) => variant.stock >= data.quantity);
+      if (!firstInStock) throw new AppError(400, 'Insufficient stock');
+      data.variantId = firstInStock.id;
+    }
+
     // Validate variant if specified
     if (data.variantId) {
       const variant = product.variants.find(v => v.id === data.variantId);

@@ -2,11 +2,12 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, Boxes, Check, ChevronLeft, ChevronRight, Edit3, ImagePlus, Package, Plus, Save, Trash2, X } from 'lucide-react';
 import { useBrands, useCategoryTree, useCreateProduct, usePublicConfig, useSellerProducts } from '../../lib/query-hooks';
 import { useAuthStore } from '../../lib/auth-store';
-import { api, del, post, put } from '../../lib/api-enhanced';
+import { api, del, post, put, API_BASE_URL } from '../../lib/api-enhanced';
 import { assetUrl, storedUploadPath } from '../../lib/assets';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import DataTable from '../shared/DataTable';
 import toast from 'react-hot-toast';
+import RichTextEditor from '../../components/RichTextEditor';
 
 const statusStyles: Record<string, string> = { DRAFT: 'badge-neutral', ACTIVE: 'badge-success', INACTIVE: 'badge-warning', ARCHIVED: 'badge-error' };
 
@@ -45,8 +46,8 @@ const emptyForm = {
     },
   ],
 };
-const defaultAcceptedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/avif', 'image/bmp', 'image/tiff', 'image/heic', 'image/heif'];
-const defaultAcceptedImageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.svg', '.ico', '.avif', '.bmp', '.tif', '.tiff', '.heic', '.heif'];
+const defaultAcceptedImageTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/avif', 'image/bmp', 'image/tiff', 'image/heic', 'image/heif'];
+const defaultAcceptedImageExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.ico', '.avif', '.bmp', '.tif', '.tiff', '.heic', '.heif'];
 
 function flattenCategories(categories: any[], depth = 0): any[] {
   return categories.flatMap((category) => [
@@ -96,50 +97,36 @@ export default function SellerProducts() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['seller', 'products'] }); toast.success('Product deleted'); },
   });
 
-       const uploadImages = useMutation({
-     mutationFn: async (files: FileList) => {
-       if (form.images.length + files.length > maxProductImages) throw new Error(`You can add up to ${maxProductImages} product images`);
-       Array.from(files).forEach((file) => {
-         const dotIndex = file.name.lastIndexOf('.');
-         const ext = dotIndex > -1 ? file.name.substring(dotIndex).toLowerCase() : '';
-         if (!file.type.startsWith('image/') && !acceptedImageTypes.includes(file.type) && !defaultAcceptedImageExtensions.includes(ext)) throw new Error(`${file.name} is not an allowed image type`);
-         if (file.size > maxImageSizeMb * 1024 * 1024) throw new Error(`${file.name} is larger than ${maxImageSizeMb}MB`);
-       });
-       const payload = new FormData();
-       Array.from(files).forEach((file) => payload.append('images', file));
-       // Use XMLHttpRequest to ensure proper multipart boundary handling
-       // and bypass stale axios interceptors
-       const token = useAuthStore.getState().accessToken;
-       const res = await new Promise<any>((resolve, reject) => {
-         const xhr = new XMLHttpRequest();
-         xhr.open('POST', '/api/upload/images');
-         xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-         xhr.onload = () => {
-           try {
-             const data = JSON.parse(xhr.responseText);
-             if (xhr.status >= 200 && xhr.status < 300) {
-               resolve(data);
-             } else {
-               reject(new Error(data.message || data.error || `Upload failed (${xhr.status})`));
-             }
-           } catch {
-             reject(new Error(`Upload failed (${xhr.status})`));
-           }
-         };
-         xhr.onerror = () => reject(new Error('Network error during upload'));
-         xhr.send(payload);
-       });
-        return res.data;
-     },
-     onSuccess: (images: any[]) => {
-       setForm((current: any) => ({ ...current, images: [...current.images, ...images].slice(0, maxProductImages) }));
-       toast.success(`${images.length} image${images.length === 1 ? '' : 's'} uploaded`);
-     },
-     onError: (err: any) => {
-       console.error('Image upload error:', err);
-       toast.error(err.message || 'Image upload failed');
-     },
-   });
+  const uploadImages = useMutation({
+    mutationFn: async (files: File[]) => {
+      if (form.images.length + files.length > maxProductImages) throw new Error(`You can add up to ${maxProductImages} product images`);
+      files.forEach((file) => {
+        const dotIndex = file.name.lastIndexOf('.');
+        const ext = dotIndex > -1 ? file.name.substring(dotIndex).toLowerCase() : '';
+        if (!file.type.startsWith('image/') && !acceptedImageTypes.includes(file.type) && !defaultAcceptedImageExtensions.includes(ext)) throw new Error(`${file.name} is not an allowed image type`);
+        if (file.size > maxImageSizeMb * 1024 * 1024) throw new Error(`${file.name} is larger than ${maxImageSizeMb}MB`);
+      });
+      const payload = new FormData();
+      files.forEach((file) => payload.append('images', file));
+      const res = await fetch('/api/upload/images', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${useAuthStore.getState().accessToken}` },
+        body: payload,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || `Upload failed (${res.status})`);
+      }
+      return data.data;
+    },
+    onSuccess: (images: any[]) => {
+      setForm((current: any) => ({ ...current, images: [...current.images, ...images].slice(0, maxProductImages) }));
+      toast.success(`${images.length} image${images.length === 1 ? '' : 's'} uploaded`);
+    },
+    onError: (err: any) => {
+      toast.error(err.message || 'Image upload failed');
+    },
+  });
 
   const createBrand = useMutation({
     mutationFn: (name: string) => post('/brands', { name, isApproved: false }),
@@ -359,7 +346,16 @@ export default function SellerProducts() {
                     <label><span className="mb-1 block text-sm font-medium text-gray-700">Product name</span><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} className="input-field" /></label>
                     <label><span className="mb-1 block text-sm font-medium text-gray-700">Slug</span><input value={form.slug} onChange={e => setForm({ ...form, slug: e.target.value })} className="input-field" placeholder="optional-custom-url" /></label>
                   </div>
-                  <label><span className="mb-1 block text-sm font-medium text-gray-700">Description</span><textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="textarea-field" rows={5} /></label>
+                  <div>
+                    <span className="mb-1 block text-sm font-medium text-gray-700">Description</span>
+                    <RichTextEditor
+                      value={form.description}
+                      onChange={(html) => setForm({ ...form, description: html })}
+                      placeholder="Describe your product in detail..."
+                      minHeight={180}
+                      compact
+                    />
+                  </div>
                   <div>
                     <div className="mb-2 flex items-center justify-between">
                       <span className="text-sm font-medium text-gray-700">Product images</span>
@@ -369,7 +365,7 @@ export default function SellerProducts() {
                       <ImagePlus className="mb-2 h-7 w-7 text-gray-400" />
                       <span className="text-sm font-medium text-gray-700">{uploadImages.isPending ? 'Uploading...' : 'Import product images'}</span>
                       <span className="mt-1 text-xs text-gray-500">Primary image is the first image</span>
-                      <input type="file" accept={acceptedImageTypes.join(',')} multiple className="hidden" disabled={uploadImages.isPending || form.images.length >= maxProductImages} onChange={(event) => { if (event.target.files?.length) uploadImages.mutate(event.target.files); event.currentTarget.value = ''; }} />
+                      <input type="file" accept={acceptedImageTypes.join(',')} multiple className="hidden" disabled={uploadImages.isPending || form.images.length >= maxProductImages} onChange={(event) => { if (event.target.files?.length) { uploadImages.mutate(Array.from(event.target.files)); event.currentTarget.value = ''; } }} />
                     </label>
                     {form.images.length > 0 && (
                       <div className="mt-3 grid grid-cols-4 gap-2 md:grid-cols-8">

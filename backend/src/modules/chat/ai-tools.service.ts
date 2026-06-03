@@ -55,7 +55,7 @@ export class AIToolsService {
 
   async getProductBySlug(slug: string): Promise<any> {
     try {
-      const product = await (prisma.product.findUnique as any)({
+      const product = await prisma.product.findFirst({
         where: { slug, isActive: true, status: 'ACTIVE' },
         include: {
           images: { orderBy: { sortOrder: 'asc' } },
@@ -1572,9 +1572,267 @@ export class AIToolsService {
     } catch { return { success: false, message: 'Failed to toggle coupon' }; }
   }
 
+  // ──────────────────────────────────────────────────
+  // NEW: ADMIN WRITE TOOLS  (require confirmation)
+  // ──────────────────────────────────────────────────
+
   /**
-   * Resolve a tool call — routes to the appropriate method based on tool name
+   * Update stock quantity for one or all variants of a product.
+   * Find by productId or slug.
    */
+  async updateProductStock(productIdOrSlug: string, stock: number, variantId?: string): Promise<any> {
+    try {
+      const product = await prisma.product.findFirst({
+        where: { OR: [{ id: productIdOrSlug }, { slug: productIdOrSlug }] },
+        include: { variants: true },
+      });
+      if (!product) return { success: false, message: `Product "${productIdOrSlug}" not found` };
+
+      if (variantId) {
+        const variant = product.variants.find(v => v.id === variantId);
+        if (!variant) return { success: false, message: `Variant "${variantId}" not found on product` };
+        await prisma.productVariant.update({ where: { id: variantId }, data: { stock } });
+        return { success: true, message: `Stock for variant "${variant.sku}" set to ${stock}`, productId: product.id, productTitle: product.title, variantId, newStock: stock };
+      }
+
+      await prisma.productVariant.updateMany({ where: { productId: product.id }, data: { stock } });
+      return { success: true, message: `All variants of "${product.title}" stock set to ${stock}`, productId: product.id, productTitle: product.title, newStock: stock };
+    } catch (error: any) {
+      return { success: false, message: `Failed to update stock: ${error.message}` };
+    }
+  }
+
+  /**
+   * Update arbitrary fields on a product.  Find by productId or slug.
+   * Writable: title, description, basePrice, discountPrice, categoryId, brandId, isActive, status.
+   */
+  async updateProductField(productIdOrSlug: string, fields: Record<string, any>): Promise<any> {
+    try {
+      const product = await prisma.product.findFirst({
+        where: { OR: [{ id: productIdOrSlug }, { slug: productIdOrSlug }] },
+        include: { category: { select: { name: true } }, brand: { select: { name: true } } },
+      });
+      if (!product) return { success: false, message: `Product "${productIdOrSlug}" not found` };
+
+      const allowedFields = ['title', 'description', 'basePrice', 'discountPrice', 'categoryId', 'brandId', 'isActive', 'status'];
+      const updateData: Record<string, any> = {};
+      for (const key of Object.keys(fields)) {
+        if (allowedFields.includes(key)) updateData[key] = fields[key];
+      }
+      if (Object.keys(updateData).length === 0) return { success: false, message: `No valid fields to update. Allowed: ${allowedFields.join(', ')}` };
+
+      await prisma.product.update({ where: { id: product.id }, data: updateData });
+
+      const label = Object.keys(updateData).map(k => `${k}=${updateData[k]}`).join(', ');
+      return { success: true, message: `Product "${product.title}" updated: ${label}`, productId: product.id, productTitle: product.title, updatedFields: updateData };
+    } catch (error: any) {
+      return { success: false, message: `Failed to update product: ${error.message}` };
+    }
+  }
+
+  /**
+   * Change a user's role.  Find by userId or email.
+   * Writable roles: CUSTOMER, SELLER, ADMIN, SUPER_ADMIN.
+   */
+  async updateUserRole(userIdOrEmail: string, role: string): Promise<any> {
+    try {
+      const validRoles = ['CUSTOMER', 'SELLER', 'ADMIN', 'SUPER_ADMIN'];
+      if (!validRoles.includes(role.toUpperCase())) return { success: false, message: `Invalid role "${role}". Allowed: ${validRoles.join(', ')}` };
+
+      const user = await prisma.user.findFirst({
+        where: { OR: [{ id: userIdOrEmail }, { email: userIdOrEmail }] },
+        include: { seller: true },
+      });
+      if (!user) return { success: false, message: `User "${userIdOrEmail}" not found` };
+
+      const previousRole = user.role;
+      await prisma.user.update({ where: { id: user.id }, data: { role: role.toUpperCase() } });
+
+      // If promoting to SELLER, create seller profile if missing
+      if (role.toUpperCase() === 'SELLER' && !user.seller) {
+        const storeSlug = `${user.firstName || 'user'}-${user.id.slice(0, 8)}`.toLowerCase();
+        await prisma.seller.create({
+          data: { userId: user.id, storeName: `${user.firstName || 'New'} Store`, storeSlug, kycStatus: 'PENDING' },
+        });
+      }
+
+      return { success: true, message: `User "${user.email}" role changed from ${previousRole} to ${role.toUpperCase()}`, userId: user.id, previousRole, newRole: role.toUpperCase() };
+    } catch (error: any) {
+      return { success: false, message: `Failed to update role: ${error.message}` };
+    }
+  }
+
+  /**
+   * Admin override for seller profile — can set isVerified, kycStatus, storeName, commissionRate, etc.
+   * Find by sellerId or storeSlug.
+   */
+  async adminUpdateSellerProfile(sellerIdentifier: string, fields: Record<string, any>): Promise<any> {
+    try {
+      const seller = await prisma.seller.findFirst({
+        where: { OR: [{ id: sellerIdentifier }, { storeSlug: sellerIdentifier }] },
+      });
+      if (!seller) return { success: false, message: `Seller "${sellerIdentifier}" not found` };
+
+      const allowedFields = ['storeName', 'storeDescription', 'isVerified', 'kycStatus', 'commissionRate', 'storeLogo', 'storeBanner', 'storeLocation'];
+      const updateData: Record<string, any> = {};
+      for (const key of Object.keys(fields)) {
+        if (allowedFields.includes(key)) updateData[key] = fields[key];
+      }
+      if (Object.keys(updateData).length === 0) return { success: false, message: `No valid fields. Allowed: ${allowedFields.join(', ')}` };
+
+      await prisma.seller.update({ where: { id: seller.id }, data: updateData });
+
+      const label = Object.keys(updateData).map(k => `${k}=${JSON.stringify(updateData[k])}`).join(', ');
+      return { success: true, message: `Seller "${seller.storeName}" updated: ${label}`, sellerId: seller.id, storeName: seller.storeName, updatedFields: updateData };
+    } catch (error: any) {
+      return { success: false, message: `Failed to update seller: ${error.message}` };
+    }
+  }
+
+  /**
+   * Create a support ticket on behalf of a user.  Find user by userId or email.
+   */
+  async createSupportTicket(userIdOrEmail: string, subject: string, description: string): Promise<any> {
+    try {
+      const user = await prisma.user.findFirst({
+        where: { OR: [{ id: userIdOrEmail }, { email: userIdOrEmail }] },
+      });
+      if (!user) return { success: false, message: `User "${userIdOrEmail}" not found` };
+
+      const ticket = await prisma.supportTicket.create({
+        data: { userId: user.id, subject: subject.trim(), description: description.trim(), status: 'OPEN', priority: 'MEDIUM' },
+      });
+      return { success: true, message: `Support ticket created for "${user.email}" — subject: "${subject}"`, ticketId: ticket.id, subject: ticket.subject, status: ticket.status, userId: user.id };
+    } catch (error: any) {
+      return { success: false, message: `Failed to create ticket: ${error.message}` };
+    }
+  }
+
+  /**
+   * Activate or deactivate a platform announcement.  Find by id, slug-like title match, or "latest".
+   * Use "latest" to grab the most recently created announcement.
+   */
+  async aiToggleAnnouncement(announcementId: string): Promise<any> {
+    try {
+      let announcement;
+      if (announcementId.toLowerCase() === 'latest') {
+        announcement = await prisma.announcement.findFirst({ orderBy: { createdAt: 'desc' } });
+      } else {
+        announcement = await prisma.announcement.findFirst({ where: { OR: [{ id: announcementId }, { title: { contains: announcementId } }] } });
+      }
+      if (!announcement) return { success: false, message: `Announcement "${announcementId}" not found` };
+
+      const updated = await prisma.announcement.update({ where: { id: announcement.id }, data: { isActive: !announcement.isActive } });
+      return { success: true, message: `Announcement "${updated.title}" ${updated.isActive ? 'activated' : 'deactivated'}`, id: updated.id, isActive: updated.isActive };
+    } catch (error: any) {
+      return { success: false, message: `Failed to toggle announcement: ${error.message}` };
+    }
+  }
+
+  /**
+   * Update a user's active status (enable / disable account).  Find by userId or email.
+   */
+  async toggleUserStatusAdmin(userIdOrEmail: string): Promise<any> {
+    try {
+      const user = await prisma.user.findFirst({
+        where: { OR: [{ id: userIdOrEmail }, { email: userIdOrEmail }] },
+      });
+      if (!user) return { success: false, message: `User "${userIdOrEmail}" not found` };
+
+      const updated = await prisma.user.update({ where: { id: user.id }, data: { isActive: !user.isActive } });
+      return { success: true, message: `User "${user.email}" is now ${updated.isActive ? 'active' : 'inactive'}`, userId: user.id, isActive: updated.isActive };
+    } catch (error: any) {
+      return { success: false, message: `Failed to toggle status: ${error.message}` };
+    }
+  }
+
+  /**
+   * Activate/deactivate a product directly (isActive + status atomically).
+   * Find by productId or slug.
+   */
+  async setProductActive(productIdOrSlug: string, isActive: boolean, status?: string): Promise<any> {
+    try {
+      const product = await prisma.product.findFirst({ where: { OR: [{ id: productIdOrSlug }, { slug: productIdOrSlug }] } });
+      if (!product) return { success: false, message: `Product "${productIdOrSlug}" not found` };
+
+      const newStatus = isActive
+        ? (status && ['ACTIVE', 'DRAFT', 'INACTIVE', 'ARCHIVED'].includes(status.toUpperCase()) ? status.toUpperCase() : 'ACTIVE')
+        : 'INACTIVE';
+      await prisma.product.update({ where: { id: product.id }, data: { isActive, status: newStatus } });
+      return { success: true, message: `Product "${product.title}" is now ${isActive ? 'active' : 'inactive'} (${newStatus})`, productId: product.id, productTitle: product.title, isActive, status: newStatus };
+    } catch (error: any) {
+      return { success: false, message: `Failed to update product status: ${error.message}` };
+    }
+  }
+
+  /**
+   * Update an order's status.  Find by orderId or orderNumber.
+   * Allowed transitions are enforced.
+   */
+  async updateOrderStatusAdmin(orderIdOrNumber: string, status: string): Promise<any> {
+    try {
+      const order = await prisma.order.findFirst({
+        where: { OR: [{ id: orderIdOrNumber }, { orderNumber: { equals: orderIdOrNumber } }] },
+        include: { user: { select: { email: true, firstName: true, lastName: true } } },
+      });
+      if (!order) return { success: false, message: `Order "${orderIdOrNumber}" not found` };
+
+      const validTransitions: Record<string, string[]> = {
+        PENDING_PAYMENT: ['CONFIRMED', 'CANCELLED'],
+        CONFIRMED: ['PROCESSING', 'CANCELLED'],
+        PROCESSING: ['SHIPPED', 'CANCELLED'],
+        SHIPPED: ['DELIVERED'],
+        DELIVERED: [],
+        CANCELLED: [],
+      };
+      const allowed = validTransitions[order.status] || [];
+      if (!allowed.includes(status.toUpperCase())) return { success: false, message: `Cannot transition from ${order.status} to ${status}. Allowed: ${allowed.join(', ') || 'none (terminal state)'}` };
+
+      await prisma.order.update({ where: { id: order.id }, data: { status: status.toUpperCase() } });
+      return { success: true, message: `Order ${order.orderNumber} moved from ${order.status} → ${status.toUpperCase()}. Customer: ${order.user.email}`, orderId: order.id, orderNumber: order.orderNumber, previousStatus: order.status, newStatus: status.toUpperCase() };
+    } catch (error: any) {
+      return { success: false, message: `Failed to update order: ${error.message}` };
+    }
+  }
+
+  /**
+   * Get a count of active orders broken down by status — useful for quick glance dashboards.
+   */
+  async getActiveOrdersCount(): Promise<any> {
+    try {
+      const statuses = ['PENDING_PAYMENT', 'CONFIRMED', 'PROCESSING', 'SHIPPED'];
+      const results = await Promise.all(
+        statuses.map(s => prisma.order.count({ where: { status: s } }).then(n => ({ status: s, count: n })))
+      );
+      const total = results.reduce((sum, r) => sum + r.count, 0);
+      return { total, byStatus: results };
+    } catch { return { error: 'Failed to count orders' }; }
+  }
+
+  /**
+   * List active products with optional category filter.
+   */
+  async listActiveProducts(categorySlug?: string, limit = 20, page = 1): Promise<any> {
+    try {
+      const where: any = { isActive: true, status: 'ACTIVE' };
+      if (categorySlug) {
+        const cat = await prisma.category.findUnique({ where: { slug: categorySlug } });
+        if (cat) where.categoryId = cat.id;
+      }
+      const [products, total] = await Promise.all([
+        prisma.product.findMany({ where, skip: (page - 1) * limit, take: limit, orderBy: { createdAt: 'desc' }, include: { images: { where: { isPrimary: true }, take: 1 }, seller: { select: { storeName: true } }, category: { select: { name: true } }, variants: { select: { stock: true } } } }),
+        prisma.product.count({ where }),
+      ]);
+      return {
+        products: products.map(p => ({ id: p.id, title: p.title, slug: p.slug, price: p.discountPrice || p.basePrice, category: p.category?.name, store: p.seller?.storeName, stock: p.variants.reduce((s: number, v: any) => s + v.stock, 0), status: p.status, isActive: p.isActive, image: p.images?.[0]?.url || null, totalSales: p.totalSales })),
+        total,
+        page,
+        totalPages: Math.ceil(total / limit),
+      };
+    } catch { return { error: 'Failed to list products' }; }
+  }
+
+  // ── TOOL ROUTER ──
   async executeTool(userId: string, tool: ToolCall): Promise<ToolResult> {
     const { name, arguments: args } = tool;
 
@@ -1613,7 +1871,6 @@ export class AIToolsService {
       case 'get_admin_dashboard': return { name, result: await this.getAdminDashboard() };
       case 'list_orders': return { name, result: await this.listOrders(args.search, args.status, args.limit, args.page) };
       case 'list_users': return { name, result: await this.listUsers(args.search, args.role, args.limit, args.page) };
-      case 'toggle_user_status': return { name, result: await this.toggleUserStatus(args.userId) };
       case 'verify_seller': return { name, result: await this.verifySeller(args.sellerId) };
       case 'reject_seller': return { name, result: await this.rejectSeller(args.sellerId, args.reason) };
       case 'list_roles': return { name, result: await this.listRoles() };
@@ -1648,6 +1905,19 @@ export class AIToolsService {
       case 'list_coupons': return { name, result: await this.listCoupons() };
       case 'create_coupon': return { name, result: await this.createCoupon(args) };
       case 'toggle_coupon': return { name, result: await this.toggleCoupon(args.couponId) };
+
+      // ── Admin Write Tools  (requiresConfirmation=true in registry) ──
+      case 'update_product_stock': return { name, result: await this.updateProductStock(args.productIdOrSlug, args.stock, args.variantId) };
+      case 'update_product_field': return { name, result: await this.updateProductField(args.productIdOrSlug, args.fields) };
+      case 'update_user_role': return { name, result: await this.updateUserRole(args.userIdOrEmail, args.role) };
+      case 'update_seller_profile_admin': return { name, result: await this.adminUpdateSellerProfile(args.sellerIdentifier, args.fields) };
+      case 'create_support_ticket': return { name, result: await this.createSupportTicket(args.userIdOrEmail, args.subject, args.description) };
+      case 'toggle_announcement_admin': return { name, result: await this.aiToggleAnnouncement(args.announcementId) };
+      case 'toggle_user_status': return { name, result: await this.toggleUserStatusAdmin(args.userIdOrEmail) };
+      case 'set_product_active': return { name, result: await this.setProductActive(args.productIdOrSlug, args.isActive, args.status) };
+      case 'update_order_status_admin': return { name, result: await this.updateOrderStatusAdmin(args.orderIdOrNumber, args.status) };
+      case 'get_active_orders_count': return { name, result: await this.getActiveOrdersCount() };
+      case 'list_active_products': return { name, result: await this.listActiveProducts(args.categorySlug, args.limit, args.page) };
 
       // ── Content Read/Write Tools ──
       case 'get_page_content': return { name, result: await this.getPageContent(args.key) };

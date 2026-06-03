@@ -1,7 +1,7 @@
 import { Heart, ShoppingBag, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import EmptyState from '../shared/EmptyState';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonGrid } from '../../components/Skeleton';
 import { useAddToCart, useRemoveFromWishlist, useWishlist } from '../../lib/query-hooks';
 import { assetUrl } from '../../lib/assets';
 
@@ -11,7 +11,13 @@ export default function WishlistPage() {
   const addToCart = useAddToCart();
   const items = data?.data || [];
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) {
+    return (
+      <div className="page-container">
+        <SkeletonGrid items={6} columns={3} className="gap-4" />
+      </div>
+    );
+  }
 
   if (!items.length) {
     return (

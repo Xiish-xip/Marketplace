@@ -40,7 +40,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex" style={{ backgroundColor: 'rgb(var(--color-gray-50))', color: 'rgb(var(--color-text))' }}>
       {/* Left Side — Brand Showcase */}
       <div className="hidden lg:flex lg:w-1/2 relative bg-gradient-to-br from-gray-950 via-gray-900 to-primary-900 overflow-hidden">
         {/* Decorative elements */}
@@ -139,7 +139,7 @@ export default function LoginPage() {
       </div>
 
       {/* Right Side — Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12 bg-gray-50 dark:bg-gray-950">
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12" style={{ backgroundColor: 'rgb(var(--color-gray-50))' }}>
         <div className="w-full max-w-md">
           {/* Mobile Logo (visible only on small screens) */}
           <div className="lg:hidden text-center mb-10">
@@ -151,7 +151,7 @@ export default function LoginPage() {
                   <span className="text-white font-bold text-sm">{name[0]}</span>
                 </div>
               )}
-              <span className="text-xl font-bold text-gray-900 dark:text-white">{name}</span>
+              <span className="text-xl font-bold" style={{ color: 'rgb(var(--color-text))' }}>{name}</span>
             </Link>
           </div>
 
@@ -160,8 +160,8 @@ export default function LoginPage() {
               <div className="hidden lg:block w-14 h-14 bg-primary-600 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-lg shadow-primary-600/20">
                 <ShoppingBag className="text-white h-7 w-7" />
               </div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome back</h1>
-              <p className="text-gray-500 dark:text-gray-400 mt-2">Sign in to your account to continue</p>
+              <h1 className="text-2xl font-bold" style={{ color: 'rgb(var(--color-text))' }}>Welcome back</h1>
+              <p className="mt-2" style={{ color: 'rgb(var(--color-text-muted))' }}>Sign in to your account to continue</p>
             </div>
 
             {oauthProviders.length > 0 && (
@@ -179,15 +179,15 @@ export default function LoginPage() {
                   ))}
                 </div>
                 <div className="relative my-6 text-center">
-                  <div className="absolute inset-x-0 top-1/2 h-px bg-gray-200 dark:bg-gray-800" />
-                  <span className="relative bg-white dark:bg-gray-950 px-3 text-xs font-medium uppercase text-gray-400 dark:text-gray-500">or sign in with email</span>
+                  <div className="absolute inset-x-0 top-1/2 h-px" style={{ backgroundColor: 'rgb(var(--color-divider))' }} />
+                  <span className="relative px-3 text-xs font-medium uppercase" style={{ backgroundColor: 'rgb(var(--color-surface))', color: 'rgb(var(--color-text-disabled))' }}>or sign in with email</span>
                 </div>
               </div>
             )}
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <label className="block text-sm font-medium mb-1.5" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                   Email or Phone
                 </label>
                 <input
@@ -201,7 +201,7 @@ export default function LoginPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                <label className="block text-sm font-medium mb-1.5" style={{ color: 'rgb(var(--color-text-secondary))' }}>
                   Password
                 </label>
                 <div className="relative">
@@ -216,7 +216,8 @@ export default function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                    style={{ color: 'rgb(var(--color-text-muted))' }}
                   >
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -225,8 +226,8 @@ export default function LoginPage() {
 
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center space-x-2 cursor-pointer">
-                  <input type="checkbox" defaultChecked className="rounded border-gray-300 dark:border-gray-700 text-primary-600 focus:ring-primary-500" />
-                  <span className="text-gray-600 dark:text-gray-400">Remember me</span>
+                  <input type="checkbox" defaultChecked className="rounded text-primary-600 focus:ring-primary-500" style={{ borderColor: 'rgb(var(--color-border-strong))' }} />
+                  <span style={{ color: 'rgb(var(--color-text-muted))' }}>Remember me</span>
                 </label>
                 <Link to="/forgot-password" className="text-primary-600 hover:text-primary-700 font-medium text-sm">
                   Forgot password?
@@ -250,7 +251,7 @@ export default function LoginPage() {
               </button>
             </form>
 
-            <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-8">
+            <p className="text-center text-sm mt-8" style={{ color: 'rgb(var(--color-text-muted))' }}>
               Don't have an account?{' '}
               <Link to="/register" className="text-primary-600 hover:text-primary-700 font-semibold">
                 Sign up
@@ -260,17 +261,17 @@ export default function LoginPage() {
 
           {/* Trust badges on mobile */}
           <div className="lg:hidden mt-6 grid grid-cols-3 gap-3 text-center text-xs">
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+            <div className="rounded-lg border p-3" style={{ borderColor: 'rgb(var(--color-border))' }}>
               <ShieldCheck className="h-4 w-4 text-primary-600 mx-auto mb-1" />
-              <span className="text-gray-500 dark:text-gray-400">Protected</span>
+              <span style={{ color: 'rgb(var(--color-text-muted))' }}>Protected</span>
             </div>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+            <div className="rounded-lg border p-3" style={{ borderColor: 'rgb(var(--color-border))' }}>
               <PackageCheck className="h-4 w-4 text-primary-600 mx-auto mb-1" />
-              <span className="text-gray-500 dark:text-gray-400">Fast ship</span>
+              <span style={{ color: 'rgb(var(--color-text-muted))' }}>Fast ship</span>
             </div>
-            <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-3">
+            <div className="rounded-lg border p-3" style={{ borderColor: 'rgb(var(--color-border))' }}>
               <Headphones className="h-4 w-4 text-primary-600 mx-auto mb-1" />
-              <span className="text-gray-500 dark:text-gray-400">Support</span>
+              <span style={{ color: 'rgb(var(--color-text-muted))' }}>Support</span>
             </div>
           </div>
         </div>

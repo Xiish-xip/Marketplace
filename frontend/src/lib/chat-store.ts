@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { api } from '../lib/api-enhanced';
+import toast from 'react-hot-toast';
+import { api, API_BASE_URL } from '../lib/api-enhanced';
 import { useAuthStore } from './auth-store';
 
 export interface ChatMessage {
@@ -34,6 +35,16 @@ interface ChatState {
   isThinkingExpanded: boolean;
   // Track the currently streaming message ID for UI targeting
   streamingMessageId: string | null;
+  // ── AI admin approval gate ──
+  pendingAction: PendingAction | null;
+}
+
+interface PendingAction {
+  auditLogId: string;
+  toolName: string;
+  toolLabel: string;
+  args: Record<string, any>;
+  summary: string;
 }
 
 interface ChatActions {
@@ -53,6 +64,10 @@ interface ChatActions {
   updateMessageThinking: (messageId: string, thinking: string, isComplete?: boolean) => void;
   // New: Update content on the streaming message
   updateStreamingMessageContent: (content: string) => void;
+  // ── Approval actions ──
+  setPendingAction: (action: PendingAction | null) => void;
+  approvePendingAction: () => Promise<void>;
+  denyPendingAction: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState & ChatActions>()(
@@ -68,6 +83,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
       thinkingText: '',
       isThinkingExpanded: true,
       streamingMessageId: null,
+      pendingAction: null,
 
       loadConversations: async () => {
         set({ isLoading: true, error: null });
@@ -142,7 +158,32 @@ export const useChatStore = create<ChatState & ChatActions>()(
         }));
 
         try {
-          const { data } = await api.post<{ data: ChatMessage }>(`/chat/conversations/${currentConversationId}/ai`, { message: content });
+          const { data } = await api.post<{ data: ChatMessage; requiresApproval?: boolean; approvalAuditLogId?: string; approvalToolName?: string; approvalArgs?: Record<string, any> }>(`/chat/conversations/${currentConversationId}/ai`, { message: content });
+
+          // ── AI Admin Approval Gate ──
+          if (data.requiresApproval && data.approvalAuditLogId && data.approvalToolName) {
+            const toolName = data.approvalToolName;
+            const toolLabel = toolName
+              .split('_')
+              .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+              .join(' ');
+            const rawArgs = data.approvalArgs || {};
+            const argSummary = Object.entries(rawArgs).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n');
+            set({
+              pendingAction: {
+                auditLogId: data.approvalAuditLogId,
+                toolName,
+                toolLabel,
+                args: rawArgs,
+                summary: `${toolLabel}\n\n${argSummary}`,
+              },
+              isLoading: false,
+            });
+            toast(`${toolLabel} - waiting for admin approval.`, { icon: '!' });
+            get().loadConversations();
+            return;
+          }
+
           let rawContent = data.data?.content || '';
           let extractedThinking = '';
 
@@ -221,8 +262,9 @@ export const useChatStore = create<ChatState & ChatActions>()(
           const token = useAuthStore.getState().accessToken;
 
           // Use GET with query param for SSE streaming (backend sends SSE only for GET)
+          const streamBase = API_BASE_URL || (import.meta.env.VITE_API_URL || 'http://localhost:3000/api');
           const response = await fetch(
-            `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/chat/conversations/${currentConversationId}/ai/stream?message=${encodeURIComponent(content)}`,
+            `${streamBase}/chat/conversations/${currentConversationId}/ai/stream?message=${encodeURIComponent(content)}`,
             {
               method: 'GET',
               headers: {
@@ -498,13 +540,75 @@ export const useChatStore = create<ChatState & ChatActions>()(
       },
 
       clearCurrent: () => {
-        set({ 
-          currentConversationId: null, 
-          messages: [], 
-          typingText: '', 
+        set({
+          currentConversationId: null,
+          messages: [],
+          typingText: '',
           thinkingText: '',
           streamingMessageId: null,
+          pendingAction: null,
         });
+      },
+
+      setPendingAction: (action: PendingAction | null) => {
+        set({ pendingAction: action });
+      },
+
+      approvePendingAction: async () => {
+        const { pendingAction } = get();
+        if (!pendingAction) return;
+        const { auditLogId } = pendingAction;
+        set({ isLoading: true, error: null });
+        try {
+          const res = await api.post(`/api/ai-tools/${auditLogId}/approve`);
+          if ((res.data as any).success) {
+            set({ pendingAction: null, isLoading: false });
+            toast.success(`${pendingAction.toolLabel} executed.`);
+            // Remove the warning block from the last assistant message
+            set(state => ({
+              messages: state.messages.map(m =>
+                m.role === 'assistant' && m.content
+                  ? { ...m, content: m.content.replace(/\n?\n?\*?\*?Action pending your approval\*?\*?[\s\S]*$/i, '').trim() }
+                  : m
+              ),
+            }));
+            window.location.reload();
+          } else {
+            set({ error: (res.data as any).message || 'Approval failed', isLoading: false });
+            toast.error((res.data as any).message || 'Approval failed');
+          }
+        } catch (err: any) {
+          set({ error: err.message || 'Approval failed', isLoading: false });
+          toast.error(err.message || 'Approval failed');
+        }
+      },
+
+      denyPendingAction: async () => {
+        const { pendingAction } = get();
+        if (!pendingAction) return;
+        const { auditLogId, toolLabel } = pendingAction;
+        set({ isLoading: true, error: null });
+        try {
+          const res = await api.post(`/api/ai-tools/${auditLogId}/deny`, { reason: 'Denied by admin in chat' });
+          if ((res.data as any).success) {
+            set({ pendingAction: null, isLoading: false });
+            toast(`${toolLabel} was denied.`);
+            // Remove the warning block from the last assistant message
+            set(state => ({
+              messages: state.messages.map(m =>
+                m.role === 'assistant' && m.content
+                  ? { ...m, content: m.content.replace(/\n?\n?\*?\*?Action pending your approval\*?\*?[\s\S]*$/i, '').trim() }
+                  : m
+              ),
+            }));
+          } else {
+            set({ error: (res.data as any).message || 'Deny failed', isLoading: false });
+            toast.error((res.data as any).message || 'Deny failed');
+          }
+        } catch (err: any) {
+          set({ error: err.message || 'Deny failed', isLoading: false });
+          toast.error(err.message || 'Deny failed');
+        }
       },
 
       appendTyping: (char: string) => {

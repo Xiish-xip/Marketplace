@@ -21,6 +21,10 @@ export const sendAIMessage = asyncHandler(async (req: Request, res: Response) =>
     data: result.message,
     usage: result.usage,
     toolResults: result.toolResults || [],
+    requiresApproval: result.requiresApproval || false,
+    approvalAuditLogId: result.approvalAuditLogId || null,
+    approvalToolName: result.approvalToolName || null,
+    approvalArgs: result.approvalArgs || null,
   });
 });
 

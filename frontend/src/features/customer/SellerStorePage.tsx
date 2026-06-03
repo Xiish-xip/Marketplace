@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { MapPin, Package, ShieldCheck, Star, Store, ShoppingBag, Grid3X3, List, ChevronRight, Phone, Mail, Clock, Award, TrendingUp, Tag, Heart } from 'lucide-react';
 import { useProducts, useSellerStore, useWishlist } from '../../lib/query-hooks';
 import { assetUrl } from '../../lib/assets';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import EmptyState from '../shared/EmptyState';
 
 function ScrollToggle({ id, children }: { id: string; children: React.ReactNode }) {
@@ -106,7 +106,7 @@ export default function SellerStorePage() {
     return acc;
   }, []);
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
   if (!seller) return <div className="page-container"><EmptyState icon={<Store className="h-8 w-8" />} title="Store not found" description="This vendor store is unavailable." actionLabel="Browse Products" actionHref="/products" /></div>;
 
   return (
@@ -149,10 +149,18 @@ export default function SellerStorePage() {
                 </div>
               </div>
             </div>
-            <Link to={`/products?sellerId=${seller.id}`} className="md:ml-auto px-5 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105"
-              style={{ backgroundColor: 'white', color: 'rgb(var(--color-primary-700))' }}>
-              View All Catalog <ChevronRight className="w-3.5 h-3.5 inline" />
-            </Link>
+            <div className="md:ml-auto flex items-center gap-3">
+              {seller.userId && (
+                <Link to={`/user/${seller.userId}`} className="px-5 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105"
+                  style={{ backgroundColor: 'rgba(255,255,255,0.15)', color: 'white', border: '1px solid rgba(255,255,255,0.3)' }}>
+                  View Profile
+                </Link>
+              )}
+              <Link to={`/products?sellerId=${seller.id}`} className="px-5 py-2 rounded-full font-semibold text-sm transition-all hover:scale-105"
+                style={{ backgroundColor: 'white', color: 'rgb(var(--color-primary-700))' }}>
+                View All Catalog <ChevronRight className="w-3.5 h-3.5 inline" />
+              </Link>
+            </div>
           </div>
         </div>
       </section>

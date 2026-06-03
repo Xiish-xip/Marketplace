@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronUp, ChevronDown, Search, ChevronLeft, ChevronRight } from 'lucide-react';
-import LoadingScreen from './LoadingScreen';
+import { Skeleton } from '../../components/Skeleton';
 import EmptyState from './EmptyState';
 
 export interface Column<T> {
@@ -15,6 +15,7 @@ interface DataTableProps<T> {
   columns: Column<T>[];
   data: T[];
   loading?: boolean;
+  loadingRows?: number;
   pagination?: { page: number; limit: number; total: number; totalPages: number };
   onPageChange?: (page: number) => void;
   sortBy?: string;
@@ -33,7 +34,7 @@ interface DataTableProps<T> {
 }
 
 export default function DataTable<T extends Record<string, any>>({
-  columns, data, loading, pagination, onPageChange, sortBy, sortOrder, onSort, search, onSearch,
+  columns, data, loading, loadingRows = 5, pagination, onPageChange, sortBy, sortOrder, onSort, search, onSearch,
   searchPlaceholder = 'Search...', emptyTitle = 'No data found', emptyDescription,
   onRowClick, selectedIds = [], onSelectionChange, idKey = 'id', bulkActions,
 }: DataTableProps<T>) {
@@ -49,7 +50,82 @@ export default function DataTable<T extends Record<string, any>>({
     else onSelectionChange?.([...selectedIds, id]);
   };
 
-  if (loading) return <LoadingScreen />;
+  const renderMobileRows = () => (
+    <div className="space-y-4 md:hidden">
+      {data.length === 0 ? (
+        <EmptyState title={emptyTitle} description={emptyDescription} />
+      ) : (
+        data.map((row, ri) => (
+          <div
+            key={row[idKey] || ri}
+            onClick={() => onRowClick?.(row)}
+            className={`rounded-3xl border bg-white p-4 shadow-sm transition ${onRowClick ? 'cursor-pointer hover:border-slate-400' : ''}`}
+            style={{ borderColor: 'rgb(var(--color-border))' }}
+          >
+            <div className="flex items-center justify-between gap-3 mb-4">
+              {onSelectionChange ? (
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(row[idKey])}
+                  onChange={() => toggleOne(row[idKey])}
+                  className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+              ) : null}
+            </div>
+            <div className="space-y-3">
+              {columns.map((col, ci) => (
+                <div key={`m-${ri}-${ci}`} className="grid gap-2 sm:grid-cols-[auto_1fr]">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{col.label}</span>
+                  <span className="text-sm text-slate-800">
+                    {col.render ? col.render(row[col.key], row, ri) : String(row[col.key] ?? '-')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+
+  if (loading) {
+    const skeletonColumns = columns.length + (onSelectionChange ? 1 : 0);
+
+    return (
+      <div>
+        {(onSearch || bulkActions) && (
+          <div className="flex flex-wrap items-center justify-between mb-4 gap-4">
+            {onSearch && <Skeleton width="14rem" height="2.25rem" className="rounded-lg" />}
+            {bulkActions && <Skeleton width="10rem" height="2.25rem" className="rounded-lg" />}
+          </div>
+        )}
+        <div className="overflow-x-auto rounded-xl border" style={{ borderColor: 'rgb(var(--color-border))' }}>
+          <table className="min-w-full divide-y" style={{ borderColor: 'rgb(var(--color-divider))' }}>
+            <thead style={{ backgroundColor: 'rgb(var(--color-surface-muted))' }}>
+              <tr>
+                {Array.from({ length: skeletonColumns }).map((_, index) => (
+                  <th key={index} className="px-4 py-3 text-left">
+                    <Skeleton width="70%" height="1rem" className="rounded" />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y" style={{ backgroundColor: 'rgb(var(--color-surface))', borderColor: 'rgb(var(--color-divider))' }}>
+              {Array.from({ length: loadingRows }).map((_, rowIndex) => (
+                <tr key={rowIndex}>
+                  {Array.from({ length: skeletonColumns }).map((__, colIndex) => (
+                    <td key={colIndex} className="px-4 py-4">
+                      <Skeleton width="100%" height="1rem" className="rounded" />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -70,12 +146,9 @@ export default function DataTable<T extends Record<string, any>>({
         </div>
       )}
 
-      <div
-        className="overflow-x-auto rounded-xl border"
-        style={{
-          borderColor: 'rgb(var(--color-border))',
-        }}
-      >
+      {renderMobileRows()}
+
+      <div className="hidden md:block overflow-x-auto rounded-xl border" style={{ borderColor: 'rgb(var(--color-border))' }}>
         <table className="min-w-full divide-y" style={{ borderColor: 'rgb(var(--color-divider))' }}>
           <thead style={{ backgroundColor: 'rgb(var(--color-surface-muted))' }}>
             <tr>

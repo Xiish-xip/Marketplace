@@ -1,19 +1,28 @@
 import dotenv from 'dotenv';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Try multiple .env locations to support both development and Docker/production
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../', '.env') });
+dotenv.config({ path: path.resolve('/app', '.env') }); // Docker default working directory
+dotenv.config({ path: path.resolve('/app/backend', '.env') }); // Docker with backend subdirectory
 
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+function requireEnv(name: string, defaultValue?: string): string {
+  const value = process.env[name] || defaultValue;
+  if (!value) {
+    throw new Error(`CRITICAL: Environment variable ${name} is not set. Application cannot start.`);
+  }
+  return value;
+}
 
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  backendUrl: process.env.BACKEND_URL || `http://localhost:${process.env.PORT || '3000'}`,
 
   // Database
-  databaseUrl: process.env.DATABASE_URL || '',
+  databaseUrl: requireEnv('DATABASE_URL'),
 
   // Redis
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
@@ -22,10 +31,10 @@ export const config = {
   meilisearchUrl: process.env.MEILISEARCH_URL || 'http://localhost:7700',
   meilisearchKey: process.env.MEILISEARCH_KEY || '',
 
-  // JWT
-  jwtSecret: process.env.JWT_SECRET || 'dev-secret',
+  // JWT — MUST be explicitly set in production
+  jwtSecret: requireEnv('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
+  jwtRefreshSecret: requireEnv('JWT_REFRESH_SECRET'),
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
 
   // OTP
@@ -48,6 +57,10 @@ export const config = {
   cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || '',
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || '',
 
+  // Storage
+  storageProvider: process.env.STORAGE_PROVIDER || 'local',
+  r2Endpoint: process.env.R2_ENDPOINT || '',
+
   // Payments
   paymentWebhookSecret: process.env.PAYMENT_WEBHOOK_SECRET || '',
 
@@ -55,9 +68,12 @@ export const config = {
   uploadDir: path.resolve(__dirname, '../../', process.env.UPLOAD_DIR || 'uploads'),
   maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '15728640', 10),
 
-  // Default Admin
-  adminEmail: process.env.ADMIN_EMAIL || 'admin@marketplace.com',
-  adminPassword: process.env.ADMIN_PASSWORD || 'Admin@123',
+  // Default Admin (seed must receive these explicitly)
+  adminEmail: process.env.ADMIN_EMAIL || '',
+  adminPassword: process.env.ADMIN_PASSWORD || '',
+
+  // Browser mutation protection
+  csrfEnabled: process.env.CSRF_ENABLED !== 'false',
 
   // Sentry (Error Tracking)
   sentryDsn: process.env.SENTRY_DSN || '',

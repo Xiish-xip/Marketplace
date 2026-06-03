@@ -1,8 +1,25 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../common/middleware';
 import { AiService } from './ai.service';
+import { logger } from '../../common/logger';
+import { secretService } from './ai-secret.service';
 
 const aiService = new AiService();
+
+export const getProviderKey = asyncHandler(async (req: Request, res: Response) => {
+  const providerId = req.params.id;
+  const apiKey = await secretService.retrieveProviderKey(providerId);
+  // Audit log that an admin requested the provider key
+  try {
+    const actor = req.user ? (req.user.userId || req.user.email || req.user) : 'unknown';
+    logger.info('Provider API key retrieved by admin', { providerId, actor });
+  } catch (e) {
+    // ignore logging errors
+  }
+
+  // Only return a key if present; otherwise null
+  res.json({ success: true, data: { apiKey } });
+});
 
 export const listProviders = asyncHandler(async (req: Request, res: Response) => {
   const result = await aiService.listProviders(req.query as any);

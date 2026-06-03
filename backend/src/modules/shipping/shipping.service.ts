@@ -64,6 +64,13 @@ export class ShippingService {
     return updated;
   }
 
+  async delete(id: string) {
+    const shipment = await prisma.shipment.findUnique({ where: { id } });
+    if (!shipment) throw new NotFoundError('Shipment not found');
+    await prisma.shipment.delete({ where: { id } });
+    return { message: 'Shipment deleted' };
+  }
+
   async appendEvent(id: string, data: any) {
     const shipment = await prisma.shipment.findUnique({ where: { id } });
     if (!shipment) throw new NotFoundError('Shipment not found');

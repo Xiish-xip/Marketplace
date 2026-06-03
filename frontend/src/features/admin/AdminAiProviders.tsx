@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '../../lib/api';
+import { SkeletonPage } from '../../components/Skeleton';
 import { 
   CheckCircle, 
   XCircle, 
@@ -39,6 +40,7 @@ interface AiProvider {
   provider: string;
   baseUrl: string | null;
   apiKey?: string;
+  hasKey?: boolean;
   models: string[];
   config: Record<string, any> | null;
   isEnabled: boolean;
@@ -198,6 +200,11 @@ export default function AdminAiProviders() {
   const [tab, setTab] = useState<'providers' | 'models'>('providers');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [hasStoredKey, setHasStoredKey] = useState(false);
+  const [keyRevealLoading, setKeyRevealLoading] = useState(false);
+  const [keyRevealed, setKeyRevealed] = useState(false);
+  const [keyRevealError, setKeyRevealError] = useState<string | null>(null);
+  const [showRevealConfirm, setShowRevealConfirm] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; message: string }>>({});
   const [fetchingModels, setFetchingModels] = useState<Record<string, boolean>>({});
   const [testingConn, setTestingConn] = useState<Record<string, boolean>>({});
@@ -282,36 +289,74 @@ export default function AdminAiProviders() {
     setEditingId(null);
   };
 
-  const openEdit = (p: AiProvider) => {
+  const openEdit = async (p: AiProvider) => {
     setEditingId(p.id);
     setForm({
       name: p.name,
       slug: p.slug,
       provider: p.provider,
-      baseUrl: p.baseUrl || '',
+      baseUrl: p.baseUrl ? decodeHtmlEntities(p.baseUrl) : '',
       apiKey: '',
       models: p.models.join(', '),
       config: p.config ? JSON.stringify(p.config, null, 2) : '{}',
     });
+    // track whether a key exists server-side (so we can show a masked placeholder)
+    setHasStoredKey(!!p.hasKey);
+    setKeyRevealed(false);
+    setKeyRevealError(null);
     setShowForm(true);
+  };
+
+  const revealProviderKey = async (providerId: string) => {
+    if (!providerId) return;
+    setKeyRevealLoading(true);
+    setKeyRevealError(null);
+    try {
+      const res = await api.get(`/ai/providers/${providerId}/key`);
+      const apiKey = res.data?.data?.apiKey || '';
+      if (apiKey) {
+        setForm(prev => ({ ...prev, apiKey }));
+        setKeyRevealed(true);
+      } else {
+        setKeyRevealError('No API key stored');
+      }
+    } catch (err: any) {
+      console.debug('Could not retrieve provider API key for reveal', err);
+      setKeyRevealError(err?.response?.data?.message || 'Failed to retrieve key');
+    } finally {
+      setKeyRevealLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const trimmedBaseUrl = normalizeBaseUrl(form.baseUrl);
+    const trimmedApiKey = form.apiKey.trim();
+
+    if (!trimmedBaseUrl) {
+      alert('Base URL is required');
+      return;
+    }
+
+    let parsedConfig: Record<string, any> = {};
+    try {
+      parsedConfig = form.config ? JSON.parse(form.config) : {};
+    } catch {
+      alert('Config must be valid JSON');
+      return;
+    }
+
     try {
       const payload: any = {
-        name: form.name,
-        slug: form.slug,
+        name: form.name.trim(),
+        slug: form.slug.trim(),
         provider: form.provider,
-        baseUrl: form.baseUrl || undefined,
+        baseUrl: trimmedBaseUrl,
         models: form.models ? form.models.split(',').map((m: string) => m.trim()).filter(Boolean) : [],
+        config: parsedConfig,
       };
-      if (form.apiKey) payload.apiKey = form.apiKey;
-      try { 
-        payload.config = JSON.parse(form.config); 
-      } catch { 
-        payload.config = {}; 
-      }
+
+      if (trimmedApiKey) payload.apiKey = trimmedApiKey;
 
       if (editingId) {
         await api.patch(`/ai/providers/${editingId}`, payload);
@@ -325,6 +370,10 @@ export default function AdminAiProviders() {
       alert(err.response?.data?.message || 'Failed to save provider');
     }
   };
+
+  if (loading) {
+    return <SkeletonPage cards={4} columns={2} className="min-h-screen px-6 py-6" />;
+  }
 
   const handleToggle = async (id: string) => {
     await api.patch(`/ai/providers/${id}/toggle`);
@@ -419,8 +468,16 @@ export default function AdminAiProviders() {
       llamacpp: 'http://localhost:8080/v1',
       vllm: 'http://localhost:8000/v1',
       'text-gen-webui': 'http://localhost:5000/v1',
+      custom: 'https://openrouter.ai/api/v1',
     };
     return hints[provider] || 'http://localhost:11434/v1';
+  };
+
+  const normalizeBaseUrl = (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed) return '';
+    // Only strip trailing slashes — never rewrite the URL path
+    return trimmed.replace(/\/+$/g, '');
   };
 
   const isLocalProvider = (provider: string) => {
@@ -431,6 +488,17 @@ export default function AdminAiProviders() {
   const getProviderIcon = (provider: string) => {
     if (isLocalProvider(provider)) return Cpu;
     return Globe;
+  };
+
+  const decodeHtmlEntities = (str: string) => {
+    if (!str) return str;
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.innerHTML = str;
+      return textarea.value;
+    } catch {
+      return str;
+    }
   };
 
   // ─── Filtering & Sorting ───────────────────────────────────────────
@@ -457,6 +525,24 @@ export default function AdminAiProviders() {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 space-y-6">
+      {showRevealConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setShowRevealConfirm(false)} />
+          <div className="bg-white dark:bg-slate-900 rounded-lg p-6 z-10 w-full max-w-md">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Reveal API Key?</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Confirm to retrieve and show the stored API key. This action will be logged.</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setShowRevealConfirm(false)} className="px-4 py-2 border rounded">Cancel</button>
+              <button
+                onClick={async () => { setShowRevealConfirm(false); if (editingId) await revealProviderKey(editingId); }}
+                className="px-4 py-2 bg-orange-500 text-white rounded"
+              >
+                {keyRevealLoading ? 'Loading...' : 'Reveal'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-4">
         <div>
@@ -615,12 +701,28 @@ export default function AdminAiProviders() {
                   required 
                   value={form.baseUrl} 
                   onChange={e => setForm({...form, baseUrl: e.target.value})} 
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all font-mono"
+                  className={`w-full px-3 py-2 rounded-lg border bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 transition-all font-mono ${
+                    form.baseUrl && !form.baseUrl.startsWith('http://') && !form.baseUrl.startsWith('https://')
+                      ? 'border-red-400 dark:border-red-500'
+                      : 'border-slate-200 dark:border-slate-700 focus:border-orange-500'
+                  }`}
                   placeholder={getProviderBaseUrlHint(form.provider)}
                 />
-                <p className="text-[11px] text-slate-400">
-                  For local models: {getProviderBaseUrlHint(form.provider)}
-                </p>
+                <div className="flex flex-col gap-1">
+                  <p className="text-[11px] text-slate-400">
+                    Enter the full API endpoint URL (e.g. {getProviderBaseUrlHint(form.provider)})
+                  </p>
+                  {form.baseUrl && !form.baseUrl.startsWith('http://') && !form.baseUrl.startsWith('https://') && (
+                    <p className="text-[11px] text-red-500 font-medium">
+                      ✗ URL must start with http:// or https://
+                    </p>
+                  )}
+                  {form.baseUrl && /\/+$/.test(form.baseUrl) && form.baseUrl.length > 0 && (
+                    <p className="text-[11px] text-amber-500">
+                      ⚠ Trailing slashes will be automatically removed
+                    </p>
+                  )}
+                </div>
               </div>
               
               <div className="md:col-span-2 space-y-1.5">
@@ -630,15 +732,48 @@ export default function AdminAiProviders() {
                     <span className="text-slate-400 font-normal"> (optional for local)</span>
                   )}
                 </label>
-                <div className="relative">
-                  <Key className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                  <input 
-                    type="password" 
-                    value={form.apiKey} 
-                    onChange={e => setForm({...form, apiKey: e.target.value})} 
-                    className="w-full pl-10 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
-                    placeholder={isLocalProvider(form.provider) ? 'Leave empty for local' : 'sk-...'}
-                  />
+                <div>
+                  <div className="relative">
+                    <Key className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+
+                    {editingId && hasStoredKey && !keyRevealed && !form.apiKey ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="password"
+                          disabled
+                          value={'••••••••'}
+                          className="w-full pl-10 pr-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-500 text-sm font-mono"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowRevealConfirm(true)}
+                          className="px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-sm border border-slate-200 dark:border-slate-700"
+                        >
+                          {keyRevealLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Reveal'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          type={keyRevealed ? 'text' : 'password'}
+                          value={form.apiKey}
+                          onChange={e => setForm({...form, apiKey: e.target.value})}
+                          className="w-full pl-10 pr-20 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 transition-all"
+                          placeholder={isLocalProvider(form.provider) ? 'Leave empty for local' : 'sk-...'}
+                        />
+                        {editingId && (
+                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                            {keyRevealed ? (
+                              <button type="button" onClick={() => { setForm(prev => ({ ...prev, apiKey: '' })); setKeyRevealed(false); }} className="px-2 py-1 text-xs border rounded">Hide</button>
+                            ) : hasStoredKey ? (
+                              <button type="button" onClick={() => { setForm(prev => ({ ...prev, apiKey: '' })); setHasStoredKey(true); }} className="px-2 py-1 text-xs border rounded">Use New</button>
+                            ) : null}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {keyRevealError && <p className="text-xs text-red-500 mt-1">{keyRevealError}</p>}
                 </div>
               </div>
               
@@ -806,7 +941,7 @@ export default function AdminAiProviders() {
                         {p.baseUrl && (
                           <div className="flex items-center gap-1.5 mt-2 text-xs text-slate-400 dark:text-slate-500">
                             <Globe className="w-3 h-3" />
-                            <span className="font-mono truncate">{p.baseUrl}</span>
+                            <span className="font-mono truncate">{decodeHtmlEntities(p.baseUrl)}</span>
                           </div>
                         )}
 

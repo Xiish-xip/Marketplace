@@ -7,7 +7,7 @@ import { useAuthStore } from '../../lib/auth-store';
 import { useQuery } from '@tanstack/react-query';
 import { get } from '../../lib/api-enhanced';
 import toast from 'react-hot-toast';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 
 export default function BecomeSellerPage() {
   const navigate = useNavigate();
@@ -23,7 +23,7 @@ export default function BecomeSellerPage() {
     retry: false,
   });
 
-  if (profileLoading) return <LoadingScreen />;
+  if (profileLoading) return <SkeletonPage cards={4} columns={2} />;
   if (profileData?.data) {
     return (
       <div className="page-container max-w-2xl text-center py-16">

@@ -65,3 +65,8 @@ export const cancelOrder = asyncHandler(async (req: Request, res: Response) => {
   const order = await orderService.cancelOrder(req.params.id, req.user!.userId);
   res.json({ success: true, data: order });
 });
+
+export const getOrderMessages = asyncHandler(async (req: Request, res: Response) => {
+  const messages = await orderService.getOrderMessages(req.params.id, req.user!);
+  res.json({ success: true, data: messages });
+});

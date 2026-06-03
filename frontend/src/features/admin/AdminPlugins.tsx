@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { FormEvent, useState, useEffect } from 'react';
 import api from '../../lib/api';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 interface Plugin {
   id: string;
@@ -17,6 +18,7 @@ interface Plugin {
 }
 
 export default function AdminPlugins() {
+  const confirmAction = useConfirm();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -47,7 +49,7 @@ export default function AdminPlugins() {
 
   useEffect(() => { fetchPlugins(); }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     try {
       await api.post('/plugins', {
@@ -73,7 +75,13 @@ export default function AdminPlugins() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Uninstall this plugin?')) return;
+    const confirmed = await confirmAction({
+      title: 'Uninstall plugin?',
+      message: 'This removes the plugin registration and disables its integrations.',
+      confirmText: 'Uninstall',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await api.delete(`/plugins/${id}`);
       fetchPlugins();

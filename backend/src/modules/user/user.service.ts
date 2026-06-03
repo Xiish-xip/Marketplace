@@ -156,4 +156,88 @@ export class UserService {
       create: { userId, ...data },
     });
   }
+
+  // ── Public Profile ──
+  async getPublicProfile(id: string) {
+    const user = await prisma.user.findUnique({
+      where: { id },
+      include: {
+        seller: {
+          select: {
+            id: true,
+            storeName: true,
+            storeSlug: true,
+            storeLogo: true,
+            storeBanner: true,
+            storeDescription: true,
+            storeLocation: true,
+            isVerified: true,
+            rating: true,
+            totalOrders: true,
+            createdAt: true,
+            _count: { select: { products: true } },
+          },
+        },
+        _count: { select: { followers: true, following: true } },
+      },
+    });
+
+    if (!user) throw new NotFoundError('User');
+
+    const { passwordHash, ...profile } = user;
+    return profile;
+  }
+
+  // ── Follow System ──
+  async followUser(followerId: string, followingId: string) {
+    if (followerId === followingId) throw new BadRequestError('Cannot follow yourself');
+
+    const targetUser = await prisma.user.findUnique({ where: { id: followingId } });
+    if (!targetUser) throw new NotFoundError('User');
+
+    const existing = await prisma.userFollow.findUnique({
+      where: { followerId_followingId: { followerId, followingId } },
+    });
+
+    if (existing) return existing;
+
+    return prisma.userFollow.create({
+      data: { followerId, followingId },
+    });
+  }
+
+  async unfollowUser(followerId: string, followingId: string) {
+    const existing = await prisma.userFollow.findUnique({
+      where: { followerId_followingId: { followerId, followingId } },
+    });
+
+    if (!existing) throw new NotFoundError('Follow relation');
+
+    await prisma.userFollow.delete({ where: { id: existing.id } });
+    return { message: 'Unfollowed successfully' };
+  }
+
+  async getFollowers(userId: string) {
+    return prisma.userFollow.findMany({
+      where: { followingId: userId },
+      include: {
+        follower: {
+          select: { id: true, firstName: true, lastName: true, avatar: true, role: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getFollowing(userId: string) {
+    return prisma.userFollow.findMany({
+      where: { followerId: userId },
+      include: {
+        following: {
+          select: { id: true, firstName: true, lastName: true, avatar: true, role: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 }

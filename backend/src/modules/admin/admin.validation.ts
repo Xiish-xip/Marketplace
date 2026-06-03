@@ -19,4 +19,17 @@ export const adminQuerySchema = z.object({
   search: z.string().optional(),
   role: z.string().optional(),
   isActive: z.string().optional(),
+  action: z.string().optional(),
+  entity: z.string().optional(),
+});
+
+export const auditLogQuerySchema = z.object({
+  page: z.string().transform(Number).default('1'),
+  limit: z.string().transform(Number).default('20'),
+  search: z.string().optional(),
+  action: z.string().optional(),
+  entity: z.string().optional(),
+  userId: z.string().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 });

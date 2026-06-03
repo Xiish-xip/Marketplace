@@ -50,7 +50,7 @@ interface StreamCallbacks {
 
 // ── Built-in tool definitions used as fallback & for initial seed ──
 // These are also stored in the AiTool registry after migration.
-const TOOL_DEFINITIONS = [
+export const TOOL_DEFINITIONS = [
   // ─────────────────────────────────────────────────
   // CUSTOMER-FACING TOOLS
   // ─────────────────────────────────────────────────
@@ -654,8 +654,150 @@ const TOOL_DEFINITIONS = [
   },
 
   // ─────────────────────────────────────────────────
-  // CONTENT READ/WRITE TOOLS — Full page content management
+  // ADMIN WRITE TOOLS — Require user confirmation before executing
   // ─────────────────────────────────────────────────
+
+   {
+     name: 'update_product_stock',
+     description: 'CRITICAL — Update stock quantity for one or all variants of a product. Find by product ID or slug. Requires productIdOrSlug and the new stock number. Omit variantId to update all variants.',
+     parameters: {
+      type: 'object',
+      properties: {
+        productIdOrSlug: { type: 'string', description: 'Product ID or URL slug to update' },
+        stock: { type: 'number', description: 'New stock quantity (integer ≥ 0)' },
+        variantId: { type: 'string', description: 'Optional: specific variant ID to update. Omit for all variants.' },
+      },
+      required: ['productIdOrSlug', 'stock'],
+    },
+  },
+  {
+    name: 'update_product_field',
+    description: 'CRITICAL — Update arbitrary fields on a product. Find by product ID or slug. Writable fields: title, description, basePrice, discountPrice, categoryId, brandId, isActive, status. Pass fields as a flat object.',
+    parameters: {
+      type: 'object',
+      properties: {
+        productIdOrSlug: { type: 'string', description: 'Product ID or URL slug to update' },
+        fields: {
+          type: 'object',
+          description: 'Object with one or more fields to update: title, description, basePrice (number), discountPrice (number|null), categoryId (string), brandId (string|null), isActive (boolean), status ("ACTIVE", "DRAFT", "INACTIVE", "ARCHIVED")',
+          properties: {
+            title: { type: 'string' },
+            description: { type: 'string' },
+            basePrice: { type: 'number' },
+            discountPrice: { type: ['number', 'null'] },
+            categoryId: { type: 'string' },
+            brandId: { type: ['string', 'null'] },
+            isActive: { type: 'boolean' },
+            status: { type: 'string', enum: ['ACTIVE', 'DRAFT', 'INACTIVE', 'ARCHIVED'] },
+          },
+        },
+      },
+      required: ['productIdOrSlug', 'fields'],
+    },
+  },
+  {
+    name: 'update_user_role',
+    description: 'CRITICAL — Change a user\'s role. Find by user ID or email. Valid roles: CUSTOMER, SELLER, ADMIN, SUPER_ADMIN. Promoting to SELLER auto-creates seller profile.',
+    parameters: {
+      type: 'object',
+      properties: {
+        userIdOrEmail: { type: 'string', description: 'User ID or email address' },
+        role: { type: 'string', enum: ['CUSTOMER', 'SELLER', 'ADMIN', 'SUPER_ADMIN'], description: 'New role to assign' },
+      },
+      required: ['userIdOrEmail', 'role'],
+    },
+  },
+  {
+    name: 'update_seller_profile_admin',
+    description: 'CRITICAL — Admin override to update seller profile. Find by seller ID or store slug. Writable fields: storeName, storeDescription, isVerified, kycStatus, commissionRate, storeLogo, storeBanner, storeLocation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sellerIdentifier: { type: 'string', description: 'Seller ID or store slug' },
+        fields: {
+          type: 'object',
+          description: 'Fields to update',
+          properties: {
+            storeName: { type: 'string' },
+            storeDescription: { type: 'string' },
+            isVerified: { type: 'boolean' },
+            kycStatus: { type: 'string', description: 'PENDING, VERIFIED, REJECTED' },
+            commissionRate: { type: 'number', description: 'Commission rate (e.g. 10.5 for 10.5%)' },
+            storeLogo: { type: 'string' },
+            storeBanner: { type: 'string' },
+            storeLocation: { type: 'string' },
+          },
+        },
+      },
+      required: ['sellerIdentifier', 'fields'],
+    },
+  },
+  {
+    name: 'create_support_ticket',
+    description: 'Create a support ticket on behalf of a user. Find user by ID or email. Subject and description are required.',
+    parameters: {
+      type: 'object',
+      properties: {
+        userIdOrEmail: { type: 'string', description: 'User ID or email to open ticket for' },
+        subject: { type: 'string', description: 'Ticket subject line' },
+        description: { type: 'string', description: 'Ticket body / description' },
+      },
+      required: ['userIdOrEmail', 'subject', 'description'],
+    },
+  },
+  {
+    name: 'toggle_announcement_admin',
+    description: 'CRITICAL — Activate or deactivate a platform announcement. Find by ID, title keyword, or "latest" for most recent.',
+    parameters: {
+      type: 'object',
+      properties: {
+        announcementId: { type: 'string', description: 'Announcement ID, title keyword, or "latest"' },
+      },
+      required: ['announcementId'],
+    },
+  },
+  {
+    name: 'set_product_active',
+    description: 'CRITICAL — Activate or deactivate a product. Find by product ID or slug. isActive=true sets status to ACTIVE by default.',
+    parameters: {
+      type: 'object',
+      properties: {
+        productIdOrSlug: { type: 'string', description: 'Product ID or URL slug' },
+        isActive: { type: 'boolean', description: 'True to activate, false to deactivate' },
+        status: { type: 'string', description: 'Optional explicit status: ACTIVE, DRAFT, INACTIVE, ARCHIVED' },
+      },
+      required: ['productIdOrSlug', 'isActive'],
+    },
+  },
+  {
+    name: 'update_order_status_admin',
+    description: 'CRITICAL — Update an order status. Find by order ID or order number. Enforces valid state transitions (PENDING_PAYMENT→CONFIRMED/PROCESSING→SHIPPED→DELIVERED).',
+    parameters: {
+      type: 'object',
+      properties: {
+        orderIdOrNumber: { type: 'string', description: 'Order ID or order number' },
+        status: { type: 'string', enum: ['PENDING_PAYMENT', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'], description: 'New order status' },
+      },
+      required: ['orderIdOrNumber', 'status'],
+    },
+  },
+  {
+    name: 'get_active_orders_count',
+    description: 'Get count of active (non-terminal) orders broken down by status: PENDING_PAYMENT, CONFIRMED, PROCESSING, SHIPPED. Admin only.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'list_active_products',
+    description: 'List all active products, optionally filtered by category slug. Returns product details, stock, price, and pagination.',
+    parameters: {
+      type: 'object',
+      properties: {
+        categorySlug: { type: 'string', description: 'Optional category slug to filter by' },
+        limit: { type: 'number', description: 'Results per page (default 20)' },
+        page: { type: 'number', description: 'Page number (default 1)' },
+      },
+    },
+  },
   {
     name: 'get_page_content',
     description: 'Get the FULL content of a platform page (About Us, Privacy Policy, Terms, Return Policy, Shipping Policy, FAQ, etc). Returns all sections and their content. Use this FIRST to read existing page content before editing. Admin only.',
@@ -950,6 +1092,10 @@ export class AIChatService {
     message: any;
     usage: any;
     toolResults?: any[];
+    requiresApproval?: boolean;
+    approvalAuditLogId?: string;
+    approvalToolName?: string;
+    approvalArgs?: Record<string, any>;
   }> {
     const conversation = await prisma.chatConversation.findUnique({
       where: { id: conversationId },
@@ -1016,7 +1162,8 @@ export class AIChatService {
     }
 
     const { providerSlug, modelSlug } = await this.resolveProviderAndModel();
-    let toolResults: any[] = [];
+   let toolResults: any[] = [];
+    let pendingApproval: { auditLogId: string; toolName: string; args: any } | null = null;
 
     try {
 const nativeTools = await this.getNativeTools(user?.role || 'CUSTOMER');
@@ -1050,6 +1197,11 @@ for (const tc of toolCalls) {
                content: JSON.stringify(result.success ? result.result : { error: result.error }),
              });
              toolResults.push(result);
+
+             // Capture approval gate if a write tool returned requiresApproval=true
+             if (result.requiresApproval && result.auditLogId && !pendingApproval) {
+               pendingApproval = { auditLogId: result.auditLogId, toolName: tc.function.name, args };
+             }
            } catch (err: any) {
              logger.error('Tool execution failed', { tool: tc.function.name, error: err.message });
              toolCallResults.push({
@@ -1058,7 +1210,7 @@ for (const tc of toolCalls) {
                content: JSON.stringify({ error: err.message }),
              });
            }
-        }
+         }
 
         // Make second call to synthesize tool results
         if (toolCallResults.length > 0) {
@@ -1117,7 +1269,17 @@ for (const tc of toolCalls) {
       }
 
       await prisma.chatConversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
-      return { message: aiMessage, usage: completion.usage, toolResults };
+      return {
+        message: aiMessage,
+        usage: completion.usage,
+        toolResults,
+        ...(pendingApproval ? {
+          requiresApproval: true,
+          approvalAuditLogId: pendingApproval.auditLogId,
+          approvalToolName: pendingApproval.toolName,
+          approvalArgs: pendingApproval.args,
+        } : {}),
+      };
 
     } catch (error: any) {
       logger.error('AI chat completion failed', { error: error.message, conversationId, providerSlug, modelSlug });
@@ -1191,10 +1353,11 @@ for (const tc of toolCalls) {
     const { providerSlug, modelSlug } = await this.resolveProviderAndModel();
 const nativeTools = await this.getNativeTools(user?.role || 'CUSTOMER');
 
-     try {
-      let fullAiContent = '';
-      let fullThinking = '';
-      let toolCallsAccumulator: any[] = [];
+      try {
+       let fullAiContent = '';
+       let fullThinking = '';
+       let toolCallsAccumulator: any[] = [];
+       let pendingApproval: { auditLogId: string; toolName: string; args: any } | null = null;
 
       await this.aiService.chatCompletionStream(
         providerSlug, modelSlug, messages,
@@ -1219,26 +1382,55 @@ const nativeTools = await this.getNativeTools(user?.role || 'CUSTOMER');
               }
 
 for (const tc of Object.values(groupedCalls) as any[]) {
-                 try {
-                   const args = JSON.parse(tc.function.arguments);
-                   const toolResult = await this.toolRunner.run({
-                     name: tc.function.name,
-                     arguments: args,
-                     userId,
-                     userRole: user?.role || 'CUSTOMER',
-                   });
-                   toolCallResults.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(toolResult.success ? toolResult.result : { error: toolResult.error }) });
-                 } catch (err: any) {
-                   toolCallResults.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) });
-                 }
-               }
+                  try {
+                    const args = JSON.parse(tc.function.arguments);
+                    const toolResult = await this.toolRunner.run({
+                      name: tc.function.name,
+                      arguments: args,
+                      userId,
+                      userRole: user?.role || 'CUSTOMER',
+                    });
+                    toolCallResults.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(toolResult.success ? toolResult.result : { error: toolResult.error }) });
 
-              if (toolCallResults.length > 0) {
-                const secondMessages = [
-                  ...messages,
-                  { role: 'assistant', content: fullAiContent || null, tool_calls: Object.values(groupedCalls) as any[] },
-                  ...toolCallResults,
-                ];
+                    if (toolResult.requiresApproval && toolResult.auditLogId && !pendingApproval) {
+                      pendingApproval = { auditLogId: toolResult.auditLogId, toolName: tc.function.name, args };
+                    }
+                  } catch (err: any) {
+                    toolCallResults.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ error: err.message }) });
+                  }
+                }
+
+               if (toolCallResults.length > 0) {
+                 const secondMessages = [
+                   ...messages,
+                   { role: 'assistant', content: fullAiContent || null, tool_calls: Object.values(groupedCalls) as any[] },
+                   ...toolCallResults,
+                 ];
+
+                 // ── If a write tool requires admin confirmation, surface it and stop here ──
+                 if (pendingApproval) {
+                   const summarizedArgs = Object.entries(pendingApproval.args)
+                     .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                     .join(', ');
+                   callbacks.onContent('\n\n---\n\n⚠️ **Action pending your approval**\n\n');
+
+                   await prisma.chatMessage.create({
+                     data: {
+                       conversationId,
+                       role: 'assistant',
+                       content: fullAiContent || JSON.stringify({ warning: 'Admin action requires approval', tool: pendingApproval.toolName, args: pendingApproval.args }),
+                       model: modelSlug,
+                       tokens: 0,
+                       toolResults: JSON.stringify([{ requiresApproval: true, auditLogId: pendingApproval.auditLogId, toolName: pendingApproval.toolName }]),
+                     },
+                   });
+                   callbacks.onDone({ content: fullAiContent, thinking: fullThinking, model: modelSlug, tokens: 0 });
+                   if (conversation.messages.length === 0) {
+                     this.generateChatTitle(content).then(title => { prisma.chatConversation.update({ where: { id: conversationId }, data: { title } }).catch(() => {}); }).catch(() => {});
+                   }
+                   await prisma.chatConversation.update({ where: { id: conversationId }, data: { updatedAt: new Date() } });
+                   return;
+                 }
 
                 await this.aiService.chatCompletionStream(providerSlug, modelSlug, secondMessages, {
                   onThinking: (text) => { fullThinking += text; callbacks.onThinking(fullThinking); },

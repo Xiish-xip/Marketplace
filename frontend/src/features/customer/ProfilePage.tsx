@@ -4,7 +4,7 @@ import { useAuthStore } from '../../lib/auth-store';
 import { get, put, post, del } from '../../lib/api-enhanced';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 
 type Tab = 'profile' | 'addresses' | 'preferences';
 
@@ -116,7 +116,7 @@ export default function ProfilePage() {
           <div className="flex justify-end mb-4">
             <button onClick={() => { setEditingAddr(null); setAddrForm({ label: '', phone: '', street: '', city: '', state: '', zipCode: '', country: 'TZ' }); setShowAddrForm(true); }} className="btn-primary btn-sm"><Plus className="w-4 h-4" /> Add Address</button>
           </div>
-          {addrLoading ? <LoadingScreen /> : (
+          {addrLoading ? <SkeletonPage cards={3} columns={1} /> : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {addresses.map((addr: any) => (
                 <div key={addr.id} className={`card p-4 relative ${addr.isDefault ? 'ring-2 ring-primary-500' : ''}`}>

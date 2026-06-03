@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { ChevronUp } from 'lucide-react';
 
-export default function BackToTop() {
+export default function BackToTop({ hideTrigger = false }: { hideTrigger?: boolean } = {}) {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -10,7 +10,15 @@ export default function BackToTop() {
     return () => window.removeEventListener('scroll', toggle);
   }, []);
 
-  if (!visible) return null;
+  useEffect(() => {
+    function handleScrollTop() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    window.addEventListener('floating:back-to-top', handleScrollTop);
+    return () => window.removeEventListener('floating:back-to-top', handleScrollTop);
+  }, []);
+
+  if (!visible || hideTrigger) return null;
 
   return (
     <button

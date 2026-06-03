@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Trash2, Power } from 'lucide-react';
 import { useAuthStore } from '../../lib/auth-store';
 import toast from 'react-hot-toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 interface Announcement {
   id: string; title: string; body: string; type: string;
@@ -10,6 +11,7 @@ interface Announcement {
 
 export default function AdminAnnouncements() {
   const { accessToken } = useAuthStore();
+  const confirmAction = useConfirm();
   const [items, setItems] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -49,7 +51,13 @@ export default function AdminAnnouncements() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('Delete this announcement?')) return;
+    const confirmed = await confirmAction({
+      title: 'Delete announcement?',
+      message: 'This removes the announcement from the platform immediately.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     try {
       const res = await fetch(`/api/announcements/${id}`, { method: 'DELETE', headers: auth });
       if ((await res.json()).success) { toast.success('Deleted'); fetchAll(); }

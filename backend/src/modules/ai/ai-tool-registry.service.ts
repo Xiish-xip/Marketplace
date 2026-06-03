@@ -257,17 +257,17 @@ export class AiToolRegistry {
 
     // 5. Risk check — require confirmation for high/critical risk tools
     if (tool.requiresConfirmation && ['high', 'critical'].includes(tool.riskLevel)) {
-      await this.auditLog({
+      const auditId = await this.auditLog({
         toolName: name, userId, userRole, status: 'pending',
         arguments: args, riskLevel: tool.riskLevel,
       });
-      const auditId = await this.getLatestAuditId();
       return { success: false, result: null, requiresApproval: true, auditLogId: auditId };
     }
 
     // 6. Check rate limits
     if (tool.rateLimit) {
-      const rateOk = await this.checkRateLimit(tool.id, userId, typeof tool.rateLimit === 'string' ? {} : tool.rateLimit || {});
+      const limits = this.parseJson<Record<string, number>>(tool.rateLimit, {});
+      const rateOk = await this.checkRateLimit(tool.id, userId, limits);
       if (!rateOk) {
         throw new AppError(429, `Rate limit exceeded for tool "${name}"`);
       }
@@ -276,29 +276,13 @@ export class AiToolRegistry {
     // 7. Execute based on handler type
     let result: any;
     try {
-      switch (tool.handlerType) {
-        case 'builtin':
-          result = await this.executeBuiltin(tool, args, userId);
-          break;
-        case 'plugin':
-          result = await this.executePlugin(tool, args, userId);
-          break;
-        case 'workflow':
-          result = await this.executeWorkflow(tool, args, userId);
-          break;
-        case 'webhook':
-          result = await this.executeWebhook(tool, args, userId);
-          break;
-        default:
-          throw new AppError(500, `Unknown handler type: ${tool.handlerType}`);
-      }
+      result = await this.dispatchToolHandler(tool, args, userId);
 
-      await this.auditLog({
+      const auditId2 = await this.auditLog({
         toolName: name, userId, userRole, toolId: tool.id,
         status: 'executed', arguments: args, result: result, riskLevel: tool.riskLevel,
       });
 
-      const auditId2 = await this.getLatestAuditId();
       return { success: true, result, auditLogId: auditId2 };
     } catch (error: any) {
       await this.auditLog({
@@ -310,7 +294,7 @@ export class AiToolRegistry {
     }
   }
 
-  async approveToolCall(auditLogId: string, approvedBy: string): Promise<any> {
+  async approveToolCall(auditLogId: string, approvedBy: string, approverRole = 'SUPER_ADMIN'): Promise<any> {
     const auditLog = await prisma.aiToolAuditLog.findUnique({ where: { id: auditLogId } });
     if (!auditLog) throw new NotFoundError('Audit log not found');
     if (auditLog.status !== 'pending') throw new AppError(400, 'Tool call is not pending approval');
@@ -323,17 +307,16 @@ export class AiToolRegistry {
       include: { permissions: true },
     });
     if (!tool) throw new NotFoundError('Tool not found');
-    const approverPerm = tool.permissions.find(p => p.role === 'ADMIN' || p.role === 'SUPER_ADMIN');
-    if (!approverPerm?.canApprove) {
+    const approverPerm = tool.permissions.find(p => p.role === approverRole);
+    const isAdminApprover = ['ADMIN', 'SUPER_ADMIN'].includes(approverRole);
+    if (!approverPerm?.canApprove && !isAdminApprover) {
       throw new AppError(403, 'Approver does not have approval permissions');
     }
 
     // Execute the handler directly (bypass approval check since already approved)
     let result: any;
     try {
-      const handler = this.builtinHandlers.get(tool.name);
-      if (!handler) throw new AppError(500, `No handler registered for tool "${tool.name}"`);
-      result = await handler(args, auditLog.userId!);
+      result = await this.dispatchToolHandler(tool, args, auditLog.userId || approvedBy);
 
       await prisma.aiToolAuditLog.update({
         where: { id: auditLogId },
@@ -369,6 +352,31 @@ export class AiToolRegistry {
     return handler(args, userId);
   }
 
+  private parseJson<T>(value: unknown, fallback: T): T {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value !== 'string') return value as T;
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+
+  private async dispatchToolHandler(tool: any, args: any, userId: string): Promise<any> {
+    switch (tool.handlerType) {
+      case 'builtin':
+        return this.executeBuiltin(tool, args, userId);
+      case 'plugin':
+        return this.executePlugin(tool, args, userId);
+      case 'workflow':
+        return this.executeWorkflow(tool, args, userId);
+      case 'webhook':
+        return this.executeWebhook(tool, args, userId);
+      default:
+        throw new AppError(500, `Unknown handler type: ${tool.handlerType}`);
+    }
+  }
+
   private async executePlugin(tool: any, args: any, userId: string): Promise<any> {
     if (!tool.handlerRef) throw new AppError(500, 'Plugin handler reference not configured');
     // Load plugin by slug
@@ -376,8 +384,9 @@ export class AiToolRegistry {
     if (!plugin || !plugin.isEnabled) throw new AppError(500, `Plugin "${tool.handlerRef}" not found or disabled`);
 
     // Execute via webhook if configured
-    if (plugin.webhookUrls && plugin.webhookUrls.length > 0) {
-      return this.executeWebhookUrl(plugin.webhookUrls[0], { tool: tool.name, args, userId });
+    const webhookUrls = this.parseJson<string[]>(plugin.webhookUrls, []);
+    if (webhookUrls.length > 0) {
+      return this.executeWebhookUrl(webhookUrls[0], { tool: tool.name, args, userId });
     }
 
     throw new AppError(500, `Plugin "${tool.handlerRef}" has no executable handler`);
@@ -528,15 +537,6 @@ export class AiToolRegistry {
     return entry.id;
   }
 
-  private async getLatestAuditId(): Promise<string | undefined> {
-    try {
-      const lastLog = await prisma.aiToolAuditLog.findFirst({ orderBy: { createdAt: 'desc' } });
-      return lastLog?.id;
-    } catch {
-      return undefined;
-    }
-  }
-
   // ── Sanitization ──
 
   private sanitize(tool: any) {
@@ -559,6 +559,93 @@ export class AiToolRegistry {
       createdAt: tool.createdAt,
       updatedAt: tool.updatedAt,
     };
+  }
+
+  /**
+   * Seed / update built-in tool DB records from TOOL_DEFINITIONS.
+   * Call this once at system start-up so confirmation flags, risk levels,
+   * and schemas are always in sync with the code definitions.
+   */
+  async seedBuiltinTools(definitions: ToolDefinition[]): Promise<void> {
+    const ADMIN_WRITE_TOOLS = new Set([
+      'update_product_stock', 'update_product_field', 'update_user_role',
+      'update_seller_profile_admin', 'create_support_ticket', 'toggle_announcement_admin',
+      'set_product_active', 'update_order_status_admin',
+    ]);
+    const CONTENT_WRITE_TOOLS = new Set([
+      'update_page', 'update_page_section', 'delete_page_section', 'update_blog_post',
+      'update_product', 'create_product', 'update_announcement', 'create_announcement',
+      'create_role', 'delete_role', 'update_config', 'toggle_user_status',
+    ]);
+    const SENSITIVE_READ_TOOLS = new Set(['generate_users_report', 'generate_orders_report', 'get_audit_logs']);
+
+    for (const def of definitions) {
+      const name = def.name;
+      const isAdminWrite = ADMIN_WRITE_TOOLS.has(name);
+      const isContentWrite = CONTENT_WRITE_TOOLS.has(name);
+      const isSensitiveRead = SENSITIVE_READ_TOOLS.has(name);
+
+      const requiresConfirmation = isAdminWrite || def.requiresConfirmation === true;
+      const riskLevel = isAdminWrite ? 'critical' : isContentWrite ? 'high' : isSensitiveRead ? 'medium' : (def.riskLevel || 'low');
+
+      try {
+        const existing = await prisma.aiTool.findUnique({ where: { name } });
+        const updateData: any = {
+          description: def.description,
+          category: 'builtin',
+          jsonSchema: def.jsonSchema ? JSON.stringify(def.jsonSchema) : null,
+          enabled: def.enabled ?? true,
+          riskLevel,
+          requiresConfirmation,
+          handlerType: 'builtin',
+        };
+        let roles = def.roles ? JSON.stringify(def.roles) : null;
+        if (!roles) {
+          if (['get_cart', 'add_to_cart', 'remove_from_cart', 'update_cart_item', 'clear_cart',
+              'get_wishlist', 'add_to_wishlist', 'remove_from_wishlist', 'get_orders', 'get_order_detail',
+              'get_product', 'search_products', 'list_categories', 'get_featured', 'get_platform_stats',
+              'get_navigation_links', 'get_seller_products', 'create_product', 'update_product',
+              'get_seller_analytics', 'get_seller_payouts'].includes(name)) {
+            roles = JSON.stringify(['CUSTOMER', 'SELLER']);
+          } else if (isAdminWrite || CONTENT_WRITE_TOOLS.has(name) || ['get_admin_dashboard', 'list_orders', 'list_users',
+                     'toggle_user_status', 'verify_seller', 'reject_seller', 'list_roles', 'create_role',
+                     'delete_role', 'get_config', 'update_config', 'get_themes', 'set_theme', 'set_theme_mode',
+                     'get_promotion_placements', 'list_pages', 'update_page', 'update_page_section',
+                     'delete_page_section', 'search_content', 'get_blog_post', 'update_blog_post',
+                     'generate_content', 'list_plugins', 'toggle_plugin', 'list_announcements',
+                     'create_announcement', 'update_announcement', 'toggle_announcement',
+                     'get_analytics_summary', 'generate_orders_report', 'generate_users_report',
+                     'get_audit_logs', 'send_notification', 'get_return_requests', 'process_return',
+                     'get_workflows', 'toggle_workflow', 'create_workflow', 'get_tickets',
+                     'update_ticket_status', 'list_coupons', 'create_coupon', 'toggle_coupon',
+                     'update_seller_profile_admin', 'create_support_ticket', 'toggle_announcement_admin',
+                     'set_product_active', 'update_order_status_admin', 'get_active_orders_count',
+                     'list_active_products'].includes(name)) {
+            roles = JSON.stringify(['ADMIN', 'SUPER_ADMIN']);
+          } else {
+            roles = JSON.stringify(['CUSTOMER', 'SELLER', 'ADMIN', 'SUPER_ADMIN']);
+          }
+        }
+        updateData.roles = roles;
+        if (existing) {
+          await prisma.aiTool.update({ where: { id: existing.id }, data: updateData });
+        } else {
+          await prisma.aiTool.create({
+            data: {
+              name,
+              description: def.description,
+              category: 'builtin',
+              jsonSchema: def.jsonSchema ? JSON.stringify(def.jsonSchema) : null,
+              enabled: def.enabled ?? true,
+              roles,
+              riskLevel,
+              requiresConfirmation,
+              handlerType: 'builtin',
+            },
+          });
+        }
+      } catch { /* skip individual tool errors */ }
+    }
   }
 }
 

@@ -126,6 +126,11 @@ export const getQuestions = asyncHandler(async (req: Request, res: Response) => 
   res.json({ success: true, data: questions });
 });
 
+export const getUserQuestions = asyncHandler(async (req: Request, res: Response) => {
+  const questions = await productService.getUserQuestions(req.user!.userId);
+  res.json({ success: true, data: questions });
+});
+
 export const askQuestion = asyncHandler(async (req: Request, res: Response) => {
   const result = createQuestionSchema.safeParse(req.body);
   if (!result.success) throw new ValidationError(result.error.flatten().fieldErrors as Record<string, string[]>);

@@ -15,5 +15,7 @@ router.put('/:id', authenticate, reviewController.update);
 router.delete('/:id', authenticate, reviewController.remove);
 router.post('/:id/reply', authenticate, authorize('SELLER', 'ADMIN', 'SUPER_ADMIN'), reviewController.reply);
 router.patch('/:id/approval', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), reviewController.toggleApproval);
+router.patch('/:id/approve', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), reviewController.approve);
+router.patch('/:id/reject', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), reviewController.reject);
 
 export default router;

@@ -7,6 +7,7 @@ import { DynamicConfigService } from '../dynamic-config/dynamic-config.service';
 
 export class PaymentService {
   private configService = new DynamicConfigService();
+  private readonly offlinePaymentMethods = new Set(['CASH_ON_DELIVERY', 'BANK_TRANSFER']);
 
   private isAdmin(user: AuthPayload): boolean {
     return ['ADMIN', 'SUPER_ADMIN'].includes(user.role);
@@ -26,6 +27,9 @@ export class PaymentService {
     if (!order) throw new NotFoundError('Order not found');
     if (order.userId !== userId) throw new AppError(403, 'Not authorized');
     if (order.paymentStatus !== 'PENDING') throw new AppError(400, 'Payment already processed');
+    if (!this.offlinePaymentMethods.has(data.method)) {
+      throw new AppError(400, 'Online payments must be started with a provider session and completed by webhook confirmation');
+    }
     const paymentConfig = await this.configService.getValue('marketplace.payments', {});
     const providers = Array.isArray(paymentConfig.providers) ? paymentConfig.providers : [];
     const enabledProvider = data.provider ? providers.find((provider: any) => provider.id === data.provider && provider.enabled) : null;
@@ -44,15 +48,14 @@ export class PaymentService {
         transactionId,
         amount: order.totalAmount,
         currency: 'TZS',
-        status: 'COMPLETED',
+        status: 'PENDING',
         metadata: data.metadata ? JSON.stringify(data.metadata) : null,
-        paidAt: new Date(),
       },
     });
 
     await prisma.order.update({
       where: { id: data.orderId },
-      data: { paymentStatus: 'PAID', status: 'PAYMENT_CONFIRMED' },
+      data: { paymentStatus: 'PENDING', status: 'PENDING_PAYMENT' },
     });
 
     return payment;
@@ -66,6 +69,12 @@ export class PaymentService {
     if (!['stripe', 'paypal', 'mpesa'].includes(provider)) {
       throw new AppError(400, 'Provider must be stripe, paypal, or mpesa');
     }
+    const paymentConfig = await this.configService.getValue('marketplace.payments', {});
+    const providers = Array.isArray(paymentConfig.providers) ? paymentConfig.providers : [];
+    const providerConfig = providers.find((item: any) => item.id === provider && item.enabled);
+    if (!providerConfig) throw new AppError(400, 'Payment provider is not enabled');
+
+    const currency = String(data.currency || providerConfig.currency || 'TZS').toUpperCase();
     const payment = await prisma.payment.create({
       data: {
         orderId: order.id,
@@ -78,18 +87,251 @@ export class PaymentService {
         metadata: JSON.stringify({
           providerSession: true,
           returnUrl: data.returnUrl,
+          cancelUrl: data.cancelUrl,
           phone: data.phone,
+          currency,
         }),
       },
     });
+
+    const mockEnabled = paymentConfig.localMockEnabled !== false || providerConfig.mode !== 'live';
+    if (mockEnabled) {
+      return {
+        payment,
+        provider,
+        checkoutUrl: provider === 'mpesa' ? null : `/checkout/${provider}/${payment.transactionId}`,
+        clientSecret: provider === 'stripe' ? `pi_${payment.id}_secret_local` : undefined,
+        approvalUrl: provider === 'paypal' ? `/paypal/approve/${payment.transactionId}` : undefined,
+        mpesaCheckoutRequestId: provider === 'mpesa' ? payment.transactionId : undefined,
+        simulated: true,
+      };
+    }
+
+    try {
+      const session = provider === 'stripe'
+        ? await this.createStripePaymentIntent(providerConfig, payment, order, data, currency)
+        : provider === 'paypal'
+          ? await this.createPaypalOrder(providerConfig, payment, order, data, currency)
+          : await this.createMpesaCheckout(providerConfig, payment, order, data);
+
+      const updatedPayment = await prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          transactionId: session.transactionId || payment.transactionId,
+          metadata: JSON.stringify({
+            ...(payment.metadata ? JSON.parse(payment.metadata) : {}),
+            ...session.metadata,
+            simulated: false,
+          }),
+        },
+      });
+
+      return {
+        payment: updatedPayment,
+        provider,
+        simulated: false,
+        ...session.response,
+      };
+    } catch (error: any) {
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: 'FAILED',
+          metadata: JSON.stringify({
+            ...(payment.metadata ? JSON.parse(payment.metadata) : {}),
+            error: error.message,
+            failedAt: new Date().toISOString(),
+          }),
+        },
+      });
+      throw error instanceof AppError ? error : new AppError(502, `Payment provider request failed: ${error.message}`);
+    }
+  }
+
+  private amountToMinorUnits(amount: number, currency: string): number {
+    const zeroDecimalCurrencies = new Set(['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF']);
+    return zeroDecimalCurrencies.has(currency.toUpperCase()) ? Math.round(amount) : Math.round(amount * 100);
+  }
+
+  private async parseProviderResponse(response: Response) {
+    const text = await response.text();
+    let body: any = text;
+    try {
+      body = text ? JSON.parse(text) : {};
+    } catch {
+      // Keep raw text for provider diagnostics.
+    }
+    if (!response.ok) {
+      const message = body?.error?.message || body?.message || body?.error_description || text || response.statusText;
+      throw new AppError(502, `Payment provider error: ${message}`);
+    }
+    return body;
+  }
+
+  private async createStripePaymentIntent(providerConfig: any, payment: any, order: any, data: any, currency: string) {
+    if (!providerConfig.secretKey) throw new AppError(422, 'Stripe secret key is not configured');
+
+    const body = new URLSearchParams({
+      amount: String(this.amountToMinorUnits(order.totalAmount, currency)),
+      currency: currency.toLowerCase(),
+      'metadata[orderId]': order.id,
+      'metadata[paymentId]': payment.id,
+      'metadata[transactionId]': payment.transactionId,
+      'automatic_payment_methods[enabled]': 'true',
+    });
+    if (data.returnUrl) body.set('return_url', data.returnUrl);
+
+    const response = await fetch('https://api.stripe.com/v1/payment_intents', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${providerConfig.secretKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body,
+    });
+    const intent = await this.parseProviderResponse(response);
+
     return {
-      payment,
-      provider,
-      checkoutUrl: provider === 'mpesa' ? null : `/checkout/${provider}/${payment.transactionId}`,
-      clientSecret: provider === 'stripe' ? `pi_${payment.id}_secret_local` : undefined,
-      approvalUrl: provider === 'paypal' ? `/paypal/approve/${payment.transactionId}` : undefined,
-      mpesaCheckoutRequestId: provider === 'mpesa' ? payment.transactionId : undefined,
-      simulated: true,
+      transactionId: intent.id,
+      metadata: { stripePaymentIntentId: intent.id, providerStatus: intent.status },
+      response: {
+        clientSecret: intent.client_secret,
+        paymentIntentId: intent.id,
+        status: intent.status,
+      },
+    };
+  }
+
+  private paypalBaseUrl(providerConfig: any): string {
+    if (providerConfig.baseUrl) return String(providerConfig.baseUrl).replace(/\/+$/, '');
+    return providerConfig.mode === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+  }
+
+  private async getPaypalAccessToken(providerConfig: any): Promise<string> {
+    if (!providerConfig.clientId || !providerConfig.clientSecret) {
+      throw new AppError(422, 'PayPal client ID and client secret are not configured');
+    }
+    const basic = Buffer.from(`${providerConfig.clientId}:${providerConfig.clientSecret}`).toString('base64');
+    const response = await fetch(`${this.paypalBaseUrl(providerConfig)}/v1/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ grant_type: 'client_credentials' }),
+    });
+    const body = await this.parseProviderResponse(response);
+    return body.access_token;
+  }
+
+  private async createPaypalOrder(providerConfig: any, payment: any, order: any, data: any, currency: string) {
+    const accessToken = await this.getPaypalAccessToken(providerConfig);
+    const response = await fetch(`${this.paypalBaseUrl(providerConfig)}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        intent: 'CAPTURE',
+        purchase_units: [{
+          reference_id: order.id,
+          custom_id: order.id,
+          invoice_id: payment.transactionId,
+          amount: {
+            currency_code: currency,
+            value: Number(order.totalAmount).toFixed(2),
+          },
+        }],
+        application_context: {
+          return_url: data.returnUrl || `${config.frontendUrl}/account/orders`,
+          cancel_url: data.cancelUrl || `${config.frontendUrl}/checkout`,
+          user_action: 'PAY_NOW',
+        },
+      }),
+    });
+    const paypalOrder = await this.parseProviderResponse(response);
+    const approvalUrl = paypalOrder.links?.find((link: any) => link.rel === 'approve')?.href;
+
+    return {
+      transactionId: paypalOrder.id,
+      metadata: { paypalOrderId: paypalOrder.id, providerStatus: paypalOrder.status },
+      response: {
+        approvalUrl,
+        paypalOrderId: paypalOrder.id,
+        status: paypalOrder.status,
+      },
+    };
+  }
+
+  private mpesaBaseUrl(providerConfig: any): string {
+    if (providerConfig.baseUrl) return String(providerConfig.baseUrl).replace(/\/+$/, '');
+    return providerConfig.mode === 'live' ? 'https://api.safaricom.co.ke' : 'https://sandbox.safaricom.co.ke';
+  }
+
+  private async getMpesaAccessToken(providerConfig: any): Promise<string> {
+    if (!providerConfig.consumerKey || !providerConfig.consumerSecret) {
+      throw new AppError(422, 'M-Pesa consumer key and consumer secret are not configured');
+    }
+    const basic = Buffer.from(`${providerConfig.consumerKey}:${providerConfig.consumerSecret}`).toString('base64');
+    const response = await fetch(`${this.mpesaBaseUrl(providerConfig)}/oauth/v1/generate?grant_type=client_credentials`, {
+      headers: { Authorization: `Basic ${basic}` },
+    });
+    const body = await this.parseProviderResponse(response);
+    return body.access_token;
+  }
+
+  private formatMpesaTimestamp(date = new Date()): string {
+    const pad = (value: number) => String(value).padStart(2, '0');
+    return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}`;
+  }
+
+  private async createMpesaCheckout(providerConfig: any, payment: any, order: any, data: any) {
+    if (!providerConfig.passkey || !providerConfig.shortcode) {
+      throw new AppError(422, 'M-Pesa passkey and shortcode are not configured');
+    }
+    if (!data.phone) throw new AppError(422, 'Phone number is required for M-Pesa checkout');
+    const callbackUrl = providerConfig.callbackUrl || `${config.backendUrl.replace(/\/+$/, '')}/api/payments/webhook/mpesa`;
+    const timestamp = this.formatMpesaTimestamp();
+    const password = Buffer.from(`${providerConfig.shortcode}${providerConfig.passkey}${timestamp}`).toString('base64');
+    const accessToken = await this.getMpesaAccessToken(providerConfig);
+    const phone = String(data.phone).replace(/[^\d]/g, '');
+
+    const response = await fetch(`${this.mpesaBaseUrl(providerConfig)}/mpesa/stkpush/v1/processrequest`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        BusinessShortCode: providerConfig.shortcode,
+        Password: password,
+        Timestamp: timestamp,
+        TransactionType: providerConfig.transactionType || 'CustomerPayBillOnline',
+        Amount: Math.round(order.totalAmount),
+        PartyA: phone,
+        PartyB: providerConfig.shortcode,
+        PhoneNumber: phone,
+        CallBackURL: callbackUrl,
+        AccountReference: order.orderNumber.slice(0, 12),
+        TransactionDesc: `Order ${order.orderNumber}`,
+      }),
+    });
+    const body = await this.parseProviderResponse(response);
+
+    return {
+      transactionId: body.CheckoutRequestID || payment.transactionId,
+      metadata: {
+        mpesaMerchantRequestId: body.MerchantRequestID,
+        mpesaCheckoutRequestId: body.CheckoutRequestID,
+        providerStatus: body.ResponseCode,
+      },
+      response: {
+        mpesaCheckoutRequestId: body.CheckoutRequestID,
+        merchantRequestId: body.MerchantRequestID,
+        responseCode: body.ResponseCode,
+        customerMessage: body.CustomerMessage,
+      },
     };
   }
 
@@ -167,17 +409,53 @@ export class PaymentService {
     return { data: payments, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
+  async completePayment(id: string) {
+    const payment = await prisma.payment.findUnique({ where: { id } });
+    if (!payment) throw new NotFoundError('Payment not found');
+    const updated = await prisma.payment.update({
+      where: { id },
+      data: { status: 'COMPLETED', paidAt: new Date() },
+    });
+    await prisma.order.update({
+      where: { id: payment.orderId },
+      data: { paymentStatus: 'PAID', status: 'PAYMENT_CONFIRMED' },
+    });
+    return updated;
+  }
+
+  async refundPayment(id: string, amount?: number) {
+    const payment = await prisma.payment.findUnique({ where: { id } });
+    if (!payment) throw new NotFoundError('Payment not found');
+    const refundAmount = amount || payment.amount;
+    const updated = await prisma.payment.update({
+      where: { id },
+      data: {
+        status: 'REFUNDED',
+        metadata: JSON.stringify({
+          ...(payment.metadata ? JSON.parse(payment.metadata) : {}),
+          refundAmount,
+          refundedAt: new Date().toISOString(),
+        }),
+      },
+    });
+    await prisma.order.update({
+      where: { id: payment.orderId },
+      data: { paymentStatus: 'REFUNDED' },
+    });
+    return updated;
+  }
+
   async handleWebhook(payload: any, signature?: string, provider?: string, rawBody?: string) {
     // --- Provider-specific signature verification ---
     if (provider === 'stripe') {
-      this.verifyStripeSignature(payload, signature);
+      this.verifyStripeSignature(rawBody || payload, signature);
     } else if (provider === 'paypal') {
-      this.verifyPaypalSignature(payload, signature);
+      this.verifyPaypalSignature(rawBody || payload, signature);
     } else if (provider === 'mpesa') {
-      this.verifyMpesaSignature(payload, signature);
+      this.verifyMpesaSignature(rawBody || payload, signature);
     } else {
       // Generic HMAC-SHA256 verification fallback
-      this.verifyGenericSignature(payload, signature);
+      this.verifyGenericSignature(rawBody || payload, signature);
     }
 
     const normalized = this.normalizeWebhookPayload(payload, provider);
@@ -200,6 +478,10 @@ export class PaymentService {
     return { received: true, provider: provider || payload.provider || 'generic' };
   }
 
+  private serializeWebhookPayload(payload: any): string {
+    return typeof payload === 'string' ? payload : JSON.stringify(payload);
+  }
+
   private verifyGenericSignature(payload: any, signature?: string) {
     if (!config.paymentWebhookSecret) return; // No secret configured, skip
     if (!signature) throw new AppError(401, 'Missing webhook signature');
@@ -207,7 +489,7 @@ export class PaymentService {
     // Support both sha256=... and raw hex signature formats
     const received = signature.replace(/^sha256=/, '');
     const expected = createHmac('sha256', config.paymentWebhookSecret)
-      .update(JSON.stringify(payload))
+      .update(this.serializeWebhookPayload(payload))
       .digest('hex');
 
     const expectedBuffer = Buffer.from(expected);
@@ -238,7 +520,7 @@ export class PaymentService {
       throw new AppError(401, 'Stripe webhook timestamp expired');
     }
 
-    const signedPayload = `${timestamp}.${typeof payload === 'string' ? payload : JSON.stringify(payload)}`;
+    const signedPayload = `${timestamp}.${this.serializeWebhookPayload(payload)}`;
     const expected = createHmac('sha256', config.paymentWebhookSecret)
       .update(signedPayload)
       .digest('hex');
@@ -257,7 +539,7 @@ export class PaymentService {
     // PayPal uses transmission-id + transmission-sig with JWT-based verification
     // For local verification we validate HMAC of the payload
     const expected = createHmac('sha256', config.paymentWebhookSecret)
-      .update(JSON.stringify(payload))
+      .update(this.serializeWebhookPayload(payload))
       .digest('hex');
 
     const expectedBuffer = Buffer.from(expected);
@@ -274,7 +556,7 @@ export class PaymentService {
     // M-Pesa uses SecurityCredential for validation
     // For local testing, validate the payload body with HMAC
     const expected = createHmac('sha256', config.paymentWebhookSecret)
-      .update(JSON.stringify(payload))
+      .update(this.serializeWebhookPayload(payload))
       .digest('hex');
 
     const expectedBuffer = Buffer.from(expected);

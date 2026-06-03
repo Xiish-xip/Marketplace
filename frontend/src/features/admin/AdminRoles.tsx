@@ -3,7 +3,7 @@ import { Shield, Plus, X, Save, Trash2, Users } from 'lucide-react';
 import { get, post, put, del } from '../../lib/api-enhanced';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import DataTable from '../shared/DataTable';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import toast from 'react-hot-toast';
 
 const modules = ['users', 'products', 'categories', 'orders', 'sellers', 'reviews', 'config', 'roles'];
@@ -36,7 +36,7 @@ export default function AdminRoles() {
     setForm({ ...form, permissions: { ...form.permissions, [module]: updated } });
   };
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
 
   return (
     <div className="space-y-6">

@@ -24,8 +24,8 @@ export const createCampaignSchema = z.object({
   type: z.enum(['FLASH_SALE', 'SEASONAL', 'VENDOR_DRIVEN']),
   discountType: z.string(),
   discountValue: z.number().positive(),
-  startAt: z.string().datetime(),
-  endAt: z.string().datetime(),
+  startAt: z.string().min(1).refine((value) => !Number.isNaN(Date.parse(value)), 'Invalid start date').transform((value) => new Date(value).toISOString()),
+  endAt: z.string().min(1).refine((value) => !Number.isNaN(Date.parse(value)), 'Invalid end date').transform((value) => new Date(value).toISOString()),
   productIds: z.array(z.string().uuid()).optional(),
 });
 

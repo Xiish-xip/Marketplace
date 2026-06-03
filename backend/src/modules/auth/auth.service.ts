@@ -255,4 +255,69 @@ export class AuthService {
 
     return { message: 'Password reset successfully' };
   }
+
+  async oauthLogin(profile: {
+    provider: string;
+    providerUserId: string;
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    avatar?: string;
+  }) {
+    const email = profile.email?.toLowerCase();
+    let user = email ? await prisma.user.findUnique({ where: { email } }) : null;
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          email,
+          passwordHash: await hashPassword(`oauth:${profile.provider}:${profile.providerUserId}:${Date.now()}`),
+          firstName: profile.firstName || profile.provider,
+          lastName: profile.lastName || 'User',
+          avatar: profile.avatar,
+          isVerified: !!email,
+          isActive: true,
+          preferences: { create: {} },
+        },
+      });
+    } else if (!user.isActive) {
+      throw new UnauthorizedError('Account is deactivated');
+    } else {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          avatar: profile.avatar || user.avatar,
+          isVerified: user.isVerified || !!email,
+        },
+      });
+    }
+
+    const payload: AuthPayload = {
+      userId: user.id,
+      email: user.email || undefined,
+      phone: user.phone || undefined,
+      role: user.role,
+    };
+    const tokens = generateTokens(payload);
+    await prisma.refreshToken.create({
+      data: {
+        token: tokens.refreshToken,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        avatar: user.avatar,
+      },
+      ...tokens,
+    };
+  }
 }

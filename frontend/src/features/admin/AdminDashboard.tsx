@@ -1,7 +1,7 @@
 import React from 'react';
 import { Users, Store, ShoppingCart, DollarSign, TrendingUp, AlertTriangle } from 'lucide-react';
 import { useAdminDashboard } from '../../lib/query-hooks';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import { Link } from 'react-router-dom';
 import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 
@@ -9,7 +9,7 @@ const COLORS = ['#3b82f6', '#22c55e', '#eab308', '#ef4444', '#8b5cf6', '#ec4899'
 
 export default function AdminDashboard() {
   const { data, isLoading } = useAdminDashboard();
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
   const dash = data?.data;
   const stats = dash?.stats || {};
   const ordersByStatus = dash?.ordersByStatus || {};

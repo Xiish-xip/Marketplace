@@ -7,6 +7,7 @@ import {
   Filter, BarChart3, RefreshCw, Trash2, Download, Copy, Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 interface Conversation {
   id: string;
@@ -133,6 +134,7 @@ function AIAnalyzer({ messages, onClose }: { messages: Message[]; onClose: () =>
 }
 
 export default function AdminChatbot() {
+  const confirmAction = useConfirm();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [loading, setLoading] = useState(true);
@@ -182,7 +184,13 @@ export default function AdminChatbot() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Permanently delete this conversation?')) return;
+    const confirmed = await confirmAction({
+      title: 'Delete conversation?',
+      message: 'This permanently deletes the selected conversation.',
+      confirmText: 'Delete',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await api.delete(`/chat/conversations/${id}`);
       setSelectedConv(null);

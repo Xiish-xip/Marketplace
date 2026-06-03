@@ -57,3 +57,13 @@ export const toggleApproval = asyncHandler(async (req: Request, res: Response) =
   const review = await reviewService.toggleApproval(req.params.id);
   res.json({ success: true, data: review });
 });
+
+export const approve = asyncHandler(async (req: Request, res: Response) => {
+  const review = await reviewService.setApproval(req.params.id, true);
+  res.json({ success: true, data: review });
+});
+
+export const reject = asyncHandler(async (req: Request, res: Response) => {
+  const review = await reviewService.setApproval(req.params.id, false);
+  res.json({ success: true, data: review });
+});

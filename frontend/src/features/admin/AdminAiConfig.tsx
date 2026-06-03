@@ -351,7 +351,10 @@ export default function AdminAiConfig() {
         </select>
         <button className="btn-secondary btn-sm text-xs" onClick={() => {
           const name = prompt('Workspace name:');
-          if (name) setConfig(prev => ({ ...prev, workspaces: [...prev.workspaces, { id: `ws-${Date.now()}`, name }], workspace: `ws-${Date.now()}` }));
+          if (name) {
+            const id = `ws-${Date.now()}`;
+            setConfig(prev => ({ ...prev, workspaces: [...prev.workspaces, { id, name }], workspace: id }));
+          }
         }}><Plus className="w-3 h-3" /> New</button>
       </div>
 
@@ -632,10 +635,12 @@ export default function AdminAiConfig() {
                     <input value={tool.name} onChange={e => updateCustomTool(tool.id, 'name', e.target.value)}
                       placeholder="tool_name" className="input-field text-sm font-mono w-48" />
                     <div className="flex items-center gap-2">
-                      <select value={JSON.stringify(tool.roles)} onChange={e => updateCustomTool(tool.id, 'roles', JSON.parse(e.target.value))}
+                      <select
+                        value={tool.roles}
+                        onChange={e => updateCustomTool(tool.id, 'roles', Array.from(e.target.selectedOptions, option => option.value))}
                         className="input-field text-xs py-1" multiple>
                         {['CUSTOMER', 'SELLER', 'ADMIN', 'SUPER_ADMIN'].map(r => (
-                          <option key={r} value={r} selected={tool.roles.includes(r)}>{r}</option>
+                          <option key={r} value={r}>{r}</option>
                         ))}
                       </select>
                       <label className="relative inline-flex items-center cursor-pointer">

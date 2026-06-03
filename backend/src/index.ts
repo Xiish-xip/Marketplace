@@ -3,13 +3,15 @@ import cors from 'cors';
 import http from 'http';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import rateLimit from 'express-rate-limit';
 import fs from 'fs/promises';
 import { config } from './common/config';
 import { errorHandler } from './common/middleware';
 import { logger } from './common/logger';
 import { prisma } from './common/prisma';
 import { initSocketServer } from './common/socket';
+import { csrfProtection, csrfTokenHandler, sanitizeRequestInput } from './common/security';
+import { aiApiLimiter, authApiLimiter, generalApiLimiter, writeApiLimiter, orderCreateLimiter, reviewCreateLimiter } from './common/rate-limiter';
+import { auditLogFromRequest } from './common/audit-logger';
 
 // Import routes
 import authRoutes from './modules/auth/auth.routes';
@@ -46,36 +48,141 @@ import chatRoutes from './modules/chat/chat.routes';
 import workflowRoutes from './modules/workflow/workflow.routes';
 import voiceRoutes from './modules/voice/voice.routes';
 import aiToolRegistryRoutes from './modules/ai/ai-tool-registry.routes';
+import aiExecutorRoutes from './modules/ai/ai-executor.routes';
+import pageBuilderRoutes from './modules/page-builder/page-builder.routes';
+import pagesRoutes from './modules/pages/pages.routes';
+import { assetsRoutes } from './modules/assets/assets.routes';
 import { automationWorker } from './modules/automation/automation.worker';
+import { aiToolRegistry } from './modules/ai/ai-tool-registry.service';
+import { registerAiToolHandlers } from './common/ai-tool-registration';
+
+// New module imports
+import currenciesRoutes from './modules/currencies/currencies.routes';
+import deliveryRoutes from './modules/delivery/delivery.routes';
+import searchRoutes from './modules/search/search.routes';
+import cacheRoutes from './modules/cache/cache.routes';
+import dropshipRoutes from './modules/dropship/dropship.routes';
+import subscriptionsRoutes from './modules/subscriptions/subscriptions.routes';
+import loyaltyRoutes from './modules/loyalty/loyalty.routes';
+import b2bRoutes from './modules/b2b/b2b.routes';
+import analyticsRoutes from './modules/analytics/analytics.routes';
+import providersRoutes from './modules/providers/providers.routes';
+import syncRoutes from './modules/sync/sync.routes';
+import badgeRoutes from './modules/badges/badges.routes';
+import translationsRoutes from './modules/translations/translations.routes';
+import campaignRoutes from './modules/promotion/campaign.routes';
+import referralsRoutes from './modules/referrals/referrals.routes';
+import cjDropshippingRoutes from './modules/cj-dropshipping/cj-dropshipping.routes';
+import siteSettingsRoutes from './modules/site-settings/site-settings.routes';
+import supplierPortalRoutes from './modules/supplier-portal/supplier-portal.routes';
 
 const app = express();
+
+function escapeSvgText(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char] || char));
+}
 
 // ── Middleware ──
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
+  hsts: config.nodeEnv === 'production'
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"],
+      formAction: ["'self'"],
+      scriptSrc: ["'self'"],
+      scriptSrcAttr: ["'none'"],
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+      connectSrc: ["'self'", 'ws:', 'wss:', 'https://*.cloudinary.com'],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      objectSrc: ["'none'"],
+      frameSrc: ["'self'"],
+      ...(config.nodeEnv === 'production' ? { upgradeInsecureRequests: [] } : {}),
+    },
+  },
 }));
+app.use((_req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(self), payment=(self)');
+  next();
+});
+const allowedOrigins = config.nodeEnv === 'production'
+  ? [config.frontendUrl]
+  : [/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/, /^https?:\/\/192\.168\.\d+\.\d+:\d+$/];
+
 app.use(cors({
-  origin: config.frontendUrl,
+  origin: (origin, callback) => {
+    if (config.nodeEnv === 'production') {
+      if (!origin || !allowedOrigins.some((o: any) => (typeof o === 'string' ? o === origin : o.test(origin)))) {
+        return callback(null, false);
+      }
+      return callback(null, true);
+    } else {
+      if (!origin || allowedOrigins.some((o: any) => o.test(origin))) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-XSRF-Token'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buf) => {
+    (req as any).rawBody = buf.toString('utf8');
+  },
+}));
 app.use(express.urlencoded({ extended: true }));
+app.use(sanitizeRequestInput);
 app.use(morgan('dev', {
   stream: { write: (message: string) => logger.info(message.trim()) },
 }));
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: config.nodeEnv === 'development' ? 2000 : 100,
-  skip: (req) => config.nodeEnv === 'development' && req.method === 'GET',
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, message: 'Too many requests, please try again later' },
+// Rate limiting — apply write-specific rate limits to mutation endpoints
+app.use('/api/auth', authApiLimiter);
+app.use(['/api/ai', '/api/ai-executor', '/api/chat'], aiApiLimiter);
+app.use('/api', generalApiLimiter);
+
+// CSRF token generation endpoint (no CSRF protection needed, but rate limited)
+app.get('/api/csrf-token', csrfTokenHandler);
+
+// CSRF protection — applied BEFORE write rate limiter to avoid wasting budget on invalid requests
+app.use('/api', csrfProtection);
+
+// Write-specific rate limits — applied after CSRF check
+app.use('/api', (req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    return writeApiLimiter(req, res, next);
+  }
+  next();
 });
-app.use('/api', limiter);
+
+// Apply orderCreateLimiter to order creation endpoint
+app.use('/api/orders', (req, _res, next) => {
+  if (req.method === 'POST') return orderCreateLimiter(req, _res, next);
+  next();
+});
+
+// Apply reviewCreateLimiter to review creation endpoint
+app.use('/api/reviews', (req, _res, next) => {
+  if (req.method === 'POST') return reviewCreateLimiter(req, _res, next);
+  next();
+});
 
 // Static files (uploads)
 app.get(['/uploads', '/uploads/'], async (_req, res, next) => {
@@ -97,14 +204,31 @@ app.get(['/uploads', '/uploads/'], async (_req, res, next) => {
     next(error);
   }
 });
-app.use('/uploads', express.static(config.uploadDir));
+app.use('/uploads', express.static(config.uploadDir, {
+  maxAge: '30d',
+  etag: true,
+  fallthrough: true,
+  setHeaders: (res, filePath) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    if (filePath.includes(`${config.uploadDir}/assets/`) || filePath.includes(`${config.uploadDir}\\assets\\`)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+  },
+}));
 app.get('/uploads/products/:filename', (req, res) => {
-  const label = req.params.filename
+  const label = escapeSvgText(req.params.filename
     .replace(/\.[^.]+$/, '')
     .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    .replace(/[^\w .]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+    .replace(/\b\w/g, (char) => char.toUpperCase()) || 'Product');
 
-  res.type('svg').send(`
+  res
+    .setHeader('Content-Security-Policy', "default-src 'none'; img-src data:; style-src 'unsafe-inline'")
+    .type('image/svg+xml')
+    .send(`
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
       <defs>
         <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
@@ -117,56 +241,154 @@ app.get('/uploads/products/:filename', (req, res) => {
       <circle cx="400" cy="330" r="96" fill="#ea580c" opacity="0.16"/>
       <path d="M310 450h180l-28-92h-124l-28 92zm42-126h96l-18-44h-60l-18 44z" fill="#ea580c"/>
       <text x="400" y="550" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" font-weight="700" fill="#7c2d12">${label}</text>
-      <text x="400" y="595" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#9a3412">Product image placeholder</text>
+      <text x="400" y="595" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" fill="#9a3412">Product image unavailable</text>
     </svg>
   `);
 });
 
-// Health check
-app.get('/api/health', (_req, res) => {
+// Reusable health check handler
+async function healthHandler(_req: express.Request, res: express.Response) {
+  let dbStatus = 'unknown';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    dbStatus = 'connected';
+  } catch {
+    dbStatus = 'disconnected';
+  }
   res.json({
-    success: true,
-    message: 'MarketPlace API is running',
+    success: dbStatus === 'connected',
+    message: dbStatus === 'connected' ? 'MarketPlace API is running' : 'Database connection failed',
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv,
+    database: dbStatus,
+    apiVersion: 'v1',
   });
+}
+
+// Health check with database connectivity verification - both /api/health and /api/v1/health
+app.get('/api/health', healthHandler);
+app.get('/api/v1/health', healthHandler);
+
+// ── Audit Logging Middleware (event-based, avoids fragile res.json monkey-patch) ──
+// Capture safe request details up-front and emit audit logs on response finish
+app.use((req, res, next) => {
+  // Only audit API routes
+  if (!req.path.startsWith('/api/')) return next();
+
+  // Capture a sanitized subset of the request body for audit details
+  try {
+    const detailsObj: any = {};
+    if (req.body && typeof req.body === 'object') {
+      const safeKeys = Object.keys(req.body).filter(
+        (k) => !['password', 'passwordHash', 'apiKey', 'token', 'secret', 'authorization'].includes(k.toLowerCase()),
+      );
+      safeKeys.forEach((k) => { detailsObj[k] = (req.body as any)[k]; });
+    }
+    (res as any).locals.__audit_safe_body = Object.keys(detailsObj).length > 0 ? detailsObj : null;
+  } catch (err) {
+    (res as any).locals.__audit_safe_body = null;
+  }
+
+  // On response finish, evaluate whether to write an audit entry
+  res.on('finish', () => {
+    try {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        const method = req.method;
+        if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+          const action = method === 'POST' ? 'CREATE' : (method === 'DELETE' ? 'DELETE' : 'UPDATE');
+
+          const pathParts = req.path.split('/').filter(Boolean);
+          let entity = 'SYSTEM';
+          if (pathParts.length >= 2) {
+            const rawEntity = pathParts[1].toUpperCase().replace(/-/g, '_').replace(/s$/, '');
+            const validEntities = ['USER', 'PRODUCT', 'ORDER', 'PAYMENT', 'SETTINGS', 'ROLE', 'AI', 'CACHE', 'TRANSLATION', 'SELLER', 'CATEGORY', 'PROMOTION', 'REVIEW', 'CART', 'BRAND', 'BLOG', 'ANNOUNCEMENT', 'TICKET', 'PLUGIN', 'API_KEY', 'GIFTCARD', 'WORKFLOW', 'AUDIT', 'SYSTEM', 'CURRENC', 'DELIVERY', 'SEARCH', 'B2B', 'DROPSHIP', 'SUBSCRIPTION', 'LOYALTY', 'ANALYTIC', 'PROVIDER', 'SYNC', 'BADGE', 'CAMPAIGN', 'REFERRAL', 'SITE_SETTING', 'SUPPLIER_PORTAL', 'ASSET', 'PAGE_BUILDER', 'PAGE', 'VOICE', 'MESSAGE', 'RFQ', 'RETURN', 'SHIPPING', 'NOTIFICATION', 'CONFIG', 'WISHLIST', 'EXPORT'];
+            entity = validEntities.includes(rawEntity) ? rawEntity : 'SETTINGS';
+          }
+
+          const entityId = pathParts.length >= 3 ? pathParts[pathParts.length - 1] : null;
+          const detailsObj = (res as any).locals.__audit_safe_body || null;
+          const details = detailsObj ? JSON.stringify(detailsObj).slice(0, 2000) : null;
+
+          auditLogFromRequest(req, action as any, entity as any, entityId, details).catch(() => {});
+        }
+      }
+    } catch (err) {
+      // swallow errors to not affect response lifecycle
+    }
+  });
+
+  next();
 });
 
-// ── Routes ──
-app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
-app.use('/api/categories', categoryRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/cart', cartRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/sellers', sellerRoutes);
-app.use('/api/brands', brandRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/payments', paymentRoutes);
-app.use('/api/shipping', shippingRoutes);
-app.use('/api/promotions', promotionRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/returns', returnRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/config', configRoutes);
-app.use('/api/wishlist', wishlistRoutes);
-app.use('/api/upload', uploadRoutes);
-app.use('/api/rfq', rfqRoutes);
-app.use('/api/automation', automationRoutes);
-app.use('/api/messaging', messagingRoutes);
-app.use('/api/tickets', ticketRoutes);
-app.use('/api/blog', blogRoutes);
-app.use('/api/giftcards', giftcardRoutes);
-app.use('/api/announcements', announcementRoutes);
-app.use('/api/api-keys', apiKeyRoutes);
-app.use('/api/openapi', openapiRoutes);
-app.use('/api/plugins', pluginRoutes);
-app.use('/api/webhook-events', webhookRoutes);
-app.use('/api/ai', aiRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/workflow', workflowRoutes);
-app.use('/api/voice', voiceRoutes);
-app.use('/api/ai-tools', aiToolRegistryRoutes);
+/**
+ * Mount routes at both /api and /api/v1 for backwards compatibility.
+ * This allows clients to use either prefix, with /api/v1 being the canonical path.
+ */
+function mountApiRoutes(basePath: string) {
+  // Core routes
+  app.use(`${basePath}/auth`, authRoutes);
+  app.use(`${basePath}/users`, userRoutes);
+  app.use(`${basePath}/categories`, categoryRoutes);
+  app.use(`${basePath}/products`, productRoutes);
+  app.use(`${basePath}/cart`, cartRoutes);
+  app.use(`${basePath}/orders`, orderRoutes);
+  app.use(`${basePath}/sellers`, sellerRoutes);
+  app.use(`${basePath}/brands`, brandRoutes);
+  app.use(`${basePath}/reviews`, reviewRoutes);
+  app.use(`${basePath}/payments`, paymentRoutes);
+  app.use(`${basePath}/shipping`, shippingRoutes);
+  app.use(`${basePath}/promotions`, promotionRoutes);
+  app.use(`${basePath}/notifications`, notificationRoutes);
+  app.use(`${basePath}/returns`, returnRoutes);
+  app.use(`${basePath}/admin`, adminRoutes);
+  app.use(`${basePath}/config`, configRoutes);
+  app.use(`${basePath}/wishlist`, wishlistRoutes);
+  app.use(`${basePath}/upload`, uploadRoutes);
+  app.use(`${basePath}/rfq`, rfqRoutes);
+  app.use(`${basePath}/automation`, automationRoutes);
+  app.use(`${basePath}/messaging`, messagingRoutes);
+  app.use(`${basePath}/tickets`, ticketRoutes);
+  app.use(`${basePath}/blog`, blogRoutes);
+  app.use(`${basePath}/giftcards`, giftcardRoutes);
+  app.use(`${basePath}/announcements`, announcementRoutes);
+  app.use(`${basePath}/api-keys`, apiKeyRoutes);
+  app.use(`${basePath}/openapi`, openapiRoutes);
+  app.use(`${basePath}/plugins`, pluginRoutes);
+  app.use(`${basePath}/webhook-events`, webhookRoutes);
+  app.use(`${basePath}/ai`, aiRoutes);
+  app.use(`${basePath}/chat`, chatRoutes);
+  app.use(`${basePath}/workflow`, workflowRoutes);
+  app.use(`${basePath}/voice`, voiceRoutes);
+  app.use(`${basePath}/ai-tools`, aiToolRegistryRoutes);
+  app.use(`${basePath}/ai-executor`, aiExecutorRoutes);
+  app.use(`${basePath}/page-builder`, pageBuilderRoutes);
+  app.use(`${basePath}/pages`, pagesRoutes);
+  app.use(`${basePath}/assets`, assetsRoutes);
+
+  // New module routes
+  app.use(`${basePath}/currencies`, currenciesRoutes);
+  app.use(`${basePath}/delivery`, deliveryRoutes);
+  app.use(`${basePath}/search`, searchRoutes);
+  app.use(`${basePath}/cache`, cacheRoutes);
+  app.use(`${basePath}/dropship`, dropshipRoutes);
+  app.use(`${basePath}/subscriptions`, subscriptionsRoutes);
+  app.use(`${basePath}/loyalty`, loyaltyRoutes);
+  app.use(`${basePath}/b2b`, b2bRoutes);
+  app.use(`${basePath}/analytics`, analyticsRoutes);
+  app.use(`${basePath}/providers`, providersRoutes);
+  app.use(`${basePath}/sync`, syncRoutes);
+  app.use(`${basePath}/badges`, badgeRoutes);
+  app.use(`${basePath}/translations`, translationsRoutes);
+  app.use(`${basePath}/campaigns`, campaignRoutes);
+  app.use(`${basePath}/referrals`, referralsRoutes);
+  app.use(`${basePath}/site-settings`, siteSettingsRoutes);
+  app.use(`${basePath}/cj-dropshipping`, cjDropshippingRoutes);
+  app.use(`${basePath}/supplier-portal`, supplierPortalRoutes);
+}
+
+// Mount all API routes at both /api (backwards compatibility) and /api/v1 (canonical)
+mountApiRoutes('/api/v1');
+mountApiRoutes('/api');
 
 // ── 404 Handler ──
 app.use((_req, res) => {
@@ -181,9 +403,30 @@ let server: http.Server;
 
 async function start() {
   try {
-    // Connect to database
+    logger.info('=== SERVER STARTUP ===');
+
     await prisma.$connect();
-    logger.info('Connected to PostgreSQL database');
+    logger.info('Connected to database');
+
+    // Register AI tool built-in handlers (extracted to separate file for maintainability)
+    await registerAiToolHandlers();
+
+    // Initialize currency auto-refresh scheduler
+    try {
+      const { currenciesService } = await import('./modules/currencies/currencies.service');
+      await currenciesService.initAutoRefresh();
+    } catch (error) {
+      logger.error('Failed to init currency auto-refresh', { error: (error as Error).message });
+    }
+
+    // Seed confirmation flags on all built-in AI tools
+    try {
+      const { TOOL_DEFINITIONS } = await import('./modules/chat/ai-chat.service');
+      await aiToolRegistry.seedBuiltinTools(TOOL_DEFINITIONS);
+      logger.info('AI tool registry seeded');
+    } catch (err) {
+      logger.warn('AI tool registry seed skipped', { error: (err instanceof Error) ? err.message : 'Unknown error' });
+    }
 
     // Create HTTP server and attach Express
     server = http.createServer(app);
@@ -198,8 +441,8 @@ async function start() {
       logger.info(`API Docs: http://localhost:${config.port}/api/openapi/docs`);
     });
 
-    // Start automation worker (queue-backed scheduled engine)
-    automationWorker.start(60000); // Run every 60 seconds
+    // Start automation worker
+    automationWorker.start(60000);
     logger.info('Automation worker started with 60s interval');
   } catch (error) {
     logger.error('Failed to start server', { error: (error as Error).message });
@@ -207,7 +450,13 @@ async function start() {
   }
 }
 
-start();
+// Only start the server when this file is executed directly (not when imported by tests)
+if (require.main === module) {
+  start();
+}
+
+// Export app for testing
+export { app, start };
 
 // Handle graceful shutdown
 let shuttingDown = false;
@@ -216,8 +465,11 @@ async function shutdown(signal: string) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info(`${signal} received. Shutting down gracefully...`);
-  
+
   try {
+    // Stop automation worker
+    automationWorker.stop();
+
     // Close the HTTP server first to stop accepting new requests
     if (server) {
       await new Promise<void>((resolve, reject) => {
@@ -235,7 +487,7 @@ async function shutdown(signal: string) {
   } catch (err) {
     logger.error('Error closing HTTP server', { error: (err as Error).message });
   }
-  
+
   await prisma.$disconnect();
   logger.info('Shutdown complete');
   process.exit(0);

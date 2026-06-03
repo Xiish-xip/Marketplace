@@ -17,5 +17,7 @@ export const providerSessionSchema = z.object({
   orderId: z.string().uuid(),
   provider: z.enum(['stripe', 'paypal', 'mpesa']),
   returnUrl: z.string().url().optional(),
+  cancelUrl: z.string().url().optional(),
+  currency: z.string().trim().length(3).optional(),
   phone: z.string().optional(),
 });

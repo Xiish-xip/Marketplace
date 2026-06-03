@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Layers, Plus, X, Save, Trash2, ChevronRight, ChevronDown, GripVertical } from 'lucide-react';
 import { get, post, put, del } from '../../lib/api-enhanced';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import toast from 'react-hot-toast';
 
 export default function AdminCategories() {
@@ -65,7 +65,7 @@ export default function AdminCategories() {
     </React.Fragment>
   ));
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
 
   return (
     <div className="flex gap-6">

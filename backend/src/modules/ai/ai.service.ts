@@ -1,4 +1,5 @@
 import { prisma } from '../../common/prisma';
+import crypto from 'crypto';
 import { NotFoundError, AppError } from '../../common/errors';
 import { logger } from '../../common/logger';
 import { encrypt } from '../../common/encryption';
@@ -17,7 +18,103 @@ interface StreamCallbacks {
   onError?: (error: string) => void;
 }
 
+// ── Circuit Breaker ──
+interface CircuitState {
+  failures: number;
+  lastFailure: number;
+  state: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+}
+
+class CircuitBreaker {
+  private state: Map<string, CircuitState> = new Map();
+  private readonly failureThreshold = 5;
+  private readonly resetTimeout = 120000; // 120s
+  private readonly halfOpenMaxRequests = 1;
+
+  async call<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const circuit = this.state.get(key) || { failures: 0, lastFailure: 0, state: 'CLOSED' as const };
+
+    if (circuit.state === 'OPEN') {
+      if (Date.now() - circuit.lastFailure > this.resetTimeout) {
+        circuit.state = 'HALF_OPEN';
+        this.state.set(key, circuit);
+      } else {
+        throw new AppError(503, `AI provider "${key}" is temporarily unavailable (circuit open)`);
+      }
+    }
+
+    try {
+      const result = await fn();
+      // Success - reset circuit
+      this.state.set(key, { failures: 0, lastFailure: 0, state: 'CLOSED' });
+      return result;
+    } catch (error: any) {
+      circuit.failures++;
+      circuit.lastFailure = Date.now();
+      if (circuit.failures >= this.failureThreshold) {
+        circuit.state = 'OPEN';
+        logger.warn(`Circuit breaker OPEN for "${key}" after ${circuit.failures} failures`);
+      }
+      this.state.set(key, circuit);
+      throw error;
+    }
+  }
+
+  getStatus(key: string): { state: string; failures: number } {
+    const circuit = this.state.get(key);
+    if (!circuit) return { state: 'CLOSED', failures: 0 };
+    return { state: circuit.state, failures: circuit.failures };
+  }
+
+  reset(key: string) {
+    this.state.delete(key);
+  }
+}
+
+const circuitBreaker = new CircuitBreaker();
+
+// ── Retry with Exponential Backoff ──
+async function withRetry<T>(fn: () => Promise<T>, options: { maxRetries?: number; baseDelay?: number; context?: string } = {}): Promise<T> {
+  const maxRetries = options.maxRetries ?? 3;
+  const baseDelay = options.baseDelay ?? 1000;
+  let lastError: any;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      // Don't retry on auth errors or validation errors
+      if (error instanceof AppError && (error.statusCode === 401 || error.statusCode === 403 || error.statusCode === 400)) {
+        throw error;
+      }
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt); // 1s, 2s, 4s
+        logger.warn(`Retry ${attempt + 1}/${maxRetries} for ${options.context || 'AI request'} after ${delay}ms: ${error.message}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export class AiService {
+  /**
+   * Health check for a provider
+   */
+  async checkProviderHealth(providerId: string): Promise<{ success: boolean; circuit: { state: string; failures: number }; provider: any }> {
+    const provider = await prisma.aiProvider.findUnique({ where: { id: providerId } });
+    if (!provider) throw new NotFoundError('AI provider not found');
+    const status = circuitBreaker.getStatus(provider.slug);
+    return { success: status.state === 'CLOSED', circuit: status, provider: this.sanitizeProvider(provider) };
+  }
+
+  /**
+   * Reset circuit breaker for a provider
+   */
+  async resetProviderCircuit(providerSlug: string): Promise<void> {
+    circuitBreaker.reset(providerSlug);
+  }
   /**
    * Get a decrypted API key for a provider, ready for use in HTTP requests.
    */
@@ -35,18 +132,23 @@ export class AiService {
     models?: string[];
     config?: Record<string, any>;
   }) {
+    const trimmedName = data.name.trim();
+    const trimmedSlug = data.slug.trim();
+    const trimmedBaseUrl = data.baseUrl?.trim();
+    const trimmedApiKey = data.apiKey?.trim();
+
     const existing = await prisma.aiProvider.findFirst({
-      where: { OR: [{ name: data.name }, { slug: data.slug }] },
+      where: { OR: [{ name: trimmedName }, { slug: trimmedSlug }] },
     });
     if (existing) throw new AppError(409, 'Provider with this name or slug already exists');
 
     const provider = await prisma.aiProvider.create({
       data: {
-        name: data.name,
-        slug: data.slug,
+        name: trimmedName,
+        slug: trimmedSlug,
         provider: data.provider,
-        baseUrl: data.baseUrl || null,
-        apiKey: data.apiKey ? encrypt(data.apiKey) : null,
+        baseUrl: trimmedBaseUrl || null,
+        apiKey: trimmedApiKey ? encrypt(trimmedApiKey) : null,
         models: JSON.stringify(data.models || []),
         config: data.config ? JSON.stringify(data.config) : null,
       },
@@ -67,10 +169,15 @@ export class AiService {
     if (!existing) throw new NotFoundError('AI provider not found');
 
     const updateData: Record<string, any> = {};
-    if (data.name !== undefined) updateData.name = data.name;
+    if (data.name !== undefined) updateData.name = data.name.trim();
     if (data.provider !== undefined) updateData.provider = data.provider;
-    if (data.baseUrl !== undefined) updateData.baseUrl = data.baseUrl;
-    if (data.apiKey !== undefined) updateData.apiKey = encrypt(data.apiKey);
+    if (data.baseUrl !== undefined) updateData.baseUrl = data.baseUrl?.trim();
+    if (data.apiKey !== undefined) {
+      const trimmedApiKey = data.apiKey.trim();
+      if (trimmedApiKey) {
+        updateData.apiKey = encrypt(trimmedApiKey);
+      }
+    }
     if (data.models !== undefined) updateData.models = JSON.stringify(data.models);
     if (data.config !== undefined) updateData.config = JSON.stringify(data.config);
     if (data.isEnabled !== undefined) updateData.isEnabled = data.isEnabled;
@@ -221,12 +328,13 @@ export class AiService {
     const provider = await prisma.aiProvider.findUnique({ where: { id: providerId } });
     if (!provider) throw new NotFoundError('AI provider not found');
 
-    const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
-    const apiKey = await this.getDecryptedApiKey(providerId);
+    const baseUrl = this.defaultBaseUrl(provider).trim();
+    const apiKey = (await this.getDecryptedApiKey(providerId))?.trim() || null;
+    const modelListUrl = this.modelListUrl(provider, baseUrl, apiKey);
 
     try {
-      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-        headers: { 'Authorization': apiKey ? `Bearer ${apiKey}` : '' },
+      const response = await fetch(modelListUrl, {
+        headers: this.providerAuthHeaders(provider, apiKey),
         signal: AbortSignal.timeout(10000),
       });
 
@@ -237,7 +345,17 @@ export class AiService {
 
       return { success: true, message: 'Connection successful', status: response.status };
     } catch (error) {
-      return { success: false, message: `Connection error: ${(error as Error).message}`, status: 0 };
+      const err = error as Error & { cause?: any; code?: string };
+      // Log detailed error info for debugging
+      logger.error('AI provider connection test failed', {
+        providerId,
+        baseUrl,
+        modelListUrl,
+        error: err.message,
+        code: err.code,
+        cause: err.cause ? (err.cause as Error)?.message || String(err.cause) : undefined,
+      });
+      return { success: false, message: `Connection error: ${err.message}`, status: 0 };
     }
   }
 
@@ -245,12 +363,13 @@ export class AiService {
     const provider = await prisma.aiProvider.findUnique({ where: { id: providerId } });
     if (!provider) throw new NotFoundError('AI provider not found');
 
-    const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
-    const apiKey = await this.getDecryptedApiKey(providerId);
+    const baseUrl = this.defaultBaseUrl(provider).trim();
+    const apiKey = (await this.getDecryptedApiKey(providerId))?.trim() || null;
+    const modelListUrl = this.modelListUrl(provider, baseUrl, apiKey);
 
     try {
-      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-        headers: { 'Authorization': apiKey ? `Bearer ${apiKey}` : '' },
+      const response = await fetch(modelListUrl, {
+        headers: this.providerAuthHeaders(provider, apiKey),
         signal: AbortSignal.timeout(15000),
       });
 
@@ -259,14 +378,17 @@ export class AiService {
       }
 
        const data = await response.json() as any;
-       const models = (data.data || data.models || []).map((m: any) => ({
-        id: m.id,
-        name: m.id,
-        slug: m.id.replace(/[.:]/g, '-'),
+       const models = (data.data || data.models || []).map((m: any) => {
+        const id = m.id || m.name?.replace(/^models\//, '') || m.name;
+        return {
+        id,
+        name: id,
+        slug: id.replace(/[.:/]/g, '-'),
         capabilities: ['chat'],
-        contextLength: 4096,
+        contextLength: m.input_token_limit || m.context_length || 4096,
         owned_by: m.owned_by || '',
-      }));
+      };
+      });
 
       // Auto-create models in database
       for (const modelData of models) {
@@ -308,11 +430,13 @@ export class AiService {
     if (!model) throw new NotFoundError('AI model not found');
     if (!model.isActive) throw new AppError(400, 'AI model is not active');
 
-    const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
+    const baseUrl = this.defaultBaseUrl(provider);
     const apiKey = await this.getDecryptedApiKey(provider.id);
+    const providerFormat = this.providerFormat(provider);
+    const modelName = model.name || modelSlug;
 
     const body: any = {
-      model: modelSlug,
+      model: modelName,
       messages: messages.map(m => {
         const msg: any = { role: m.role };
         // Preserve tool_calls for assistant messages that contain them
@@ -343,15 +467,37 @@ export class AiService {
       body.stream = true;
     }
 
-try {
-       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-         method: 'POST',
-         headers: {
-           'Content-Type': 'application/json',
-           'Authorization': apiKey ? `Bearer ${apiKey}` : '',
-         },
-         body: JSON.stringify(body),
-       });
+    if (providerFormat === 'anthropic') {
+      const modelName = model.name || modelSlug;
+      return circuitBreaker.call(provider.slug, () => withRetry(
+        () => this.anthropicChatCompletion(baseUrl, apiKey, modelName, messages, options),
+        { context: `anthropic:${provider.slug}` },
+      ));
+    }
+
+    if (providerFormat === 'gemini') {
+      const modelName = model.name || modelSlug;
+      return circuitBreaker.call(provider.slug, () => withRetry(
+        () => this.geminiChatCompletion(baseUrl, apiKey, modelName, messages, options),
+        { context: `gemini:${provider.slug}` },
+      ));
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+    try {
+      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': apiKey ? `Bearer ${apiKey}` : '',
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
 
        if (!response.ok) {
          const errorText = await response.text();
@@ -365,11 +511,59 @@ try {
        const completion = await response.json();
        return completion;
 } catch (error: any) {
+       clearTimeout(timeoutId);
        if (error instanceof AppError) throw error;
+       if ((error as Error).name === 'AbortError') {
+         throw new AppError(504, 'AI provider request timed out after 120s');
+       }
        logger.error('AI chat completion failed', { error: error.message });
        throw new AppError(502, `AI provider request failed: ${error.message}`);
      }
    }
+
+  async createEmbeddings(providerSlug: string, modelSlug: string, input: string | string[]): Promise<any> {
+    const provider = await prisma.aiProvider.findUnique({ where: { slug: providerSlug } });
+    if (!provider) throw new NotFoundError('AI provider not found');
+    if (!provider.isEnabled) throw new AppError(400, 'AI provider is disabled');
+
+    const model = await prisma.aiModel.findUnique({ where: { slug: modelSlug } });
+    const modelName = model?.name || modelSlug;
+
+    const baseUrl = this.defaultBaseUrl(provider);
+    const apiKey = await this.getDecryptedApiKey(provider.id);
+    const providerFormat = this.providerFormat(provider);
+
+    if (providerFormat === 'gemini') {
+      return this.geminiEmbeddings(baseUrl, apiKey, modelName, input);
+    }
+
+    if (providerFormat === 'anthropic') {
+      throw new AppError(400, 'Anthropic does not currently expose a compatible embeddings endpoint');
+    }
+
+    try {
+      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': apiKey ? `Bearer ${apiKey}` : '',
+        },
+        body: JSON.stringify({ model: modelName, input }),
+        signal: AbortSignal.timeout(30000),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new AppError(response.status, `AI embeddings provider error: ${errorText}`);
+      }
+
+      return await response.json() as any;
+    } catch (error: any) {
+      if (error instanceof AppError) throw error;
+      logger.error('AI embeddings request failed', { error: error.message });
+      throw new AppError(502, `AI embeddings request failed: ${error.message}`);
+    }
+  }
 
    // ── Streaming Chat Completion with XML Tag Extraction ──
 
@@ -388,31 +582,56 @@ try {
      if (!model) throw new NotFoundError('AI model not found');
      if (!model.isActive) throw new AppError(400, 'AI model is not active');
 
-     const baseUrl = provider.baseUrl || 'https://api.openai.com/v1';
+     const baseUrl = this.defaultBaseUrl(provider);
      const apiKey = await this.getDecryptedApiKey(provider.id);
+     const providerFormat = this.providerFormat(provider);
 
-     const body: any = {
-       model: modelSlug,
-       messages: messages.map(m => {
-         const msg: any = { role: m.role };
-         if ((m as any).tool_calls) msg.tool_calls = (m as any).tool_calls;
-         if (m.role === 'tool') {
-           msg.content = m.content;
-           msg.tool_call_id = (m as any).tool_call_id;
-         } else {
-           msg.content = m.content;
+     if (providerFormat !== 'openai') {
+       try {
+         const completion: any = await this.chatCompletion(providerSlug, modelSlug, messages, options);
+         const content = completion?.choices?.[0]?.message?.content || '';
+         if (content && callbacks.onContent) callbacks.onContent(content);
+         if (callbacks.onDone) {
+           callbacks.onDone({
+             content,
+             thinking: '',
+             model: completion?.model || modelSlug,
+             tokens: completion?.usage?.total_tokens || 0,
+           });
          }
-        return msg;
-      }),
-      temperature: options?.temperature ?? 0.7,
-      max_tokens: options?.max_tokens ?? Math.min(model.contextLength, 4096),
-      stream: true,
-    };
+       } catch (error) {
+         if (callbacks.onError) callbacks.onError((error as Error).message);
+       }
+       return;
+     }
+
+const modelName = model.name || modelSlug;
+
+      const body: any = {
+        model: modelName,
+        messages: messages.map(m => {
+          const msg: any = { role: m.role };
+          if ((m as any).tool_calls) msg.tool_calls = (m as any).tool_calls;
+          if (m.role === 'tool') {
+            msg.content = m.content;
+            msg.tool_call_id = (m as any).tool_call_id;
+          } else {
+            msg.content = m.content;
+          }
+         return msg;
+       }),
+       temperature: options?.temperature ?? 0.7,
+       max_tokens: options?.max_tokens ?? Math.min(model.contextLength, 4096),
+       stream: true,
+     };
 
     if (options?.tools && options.tools.length > 0) {
       body.tools = options.tools;
       body.tool_choice = 'auto';
     }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
 
     try {
       const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -422,7 +641,10 @@ try {
           'Authorization': apiKey ? `Bearer ${apiKey}` : '',
         },
         body: JSON.stringify(body),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -579,13 +801,203 @@ try {
         });
       }
     } catch (error) {
+      clearTimeout(timeoutId);
       if (error instanceof AppError) throw error;
+      if ((error as Error).name === 'AbortError') {
+        logger.error('AI streaming timed out after 120s');
+        if (callbacks.onError) callbacks.onError('Request timed out after 120 seconds');
+        return;
+      }
       logger.error('AI streaming failed', { error: (error as Error).message });
       if (callbacks.onError) callbacks.onError((error as Error).message);
     }
   }
 
   // ── Helpers ──
+
+  private providerFormat(provider: any): 'openai' | 'anthropic' | 'gemini' {
+    const value = `${provider.provider || ''} ${provider.slug || ''} ${provider.name || ''} ${provider.baseUrl || ''}`.toLowerCase();
+    if (value.includes('anthropic') || value.includes('claude')) return 'anthropic';
+    if (value.includes('gemini') || value.includes('google')) return 'gemini';
+    return 'openai';
+  }
+
+  private normalizeBaseUrl(rawUrl: string | null | undefined): string {
+    if (!rawUrl) return '';
+    // Decode HTML entities (e.g. &#x2F; -> /)
+    const decoded = rawUrl
+      .trim()
+      .replace(/&#x2F;/g, '/')
+      .replace(/&#47;/g, '/')
+      .replace(/&/g, '&')
+      .replace(/</g, '<')
+      .replace(/>/g, '>')
+      .replace(/"/g, '"')
+      .replace(/&#39;/g, "'");
+    // Only strip trailing slashes — never rewrite the URL path
+    return decoded.replace(/\/+$/g, '');
+  }
+
+  private defaultBaseUrl(provider: any): string {
+    if (provider.baseUrl) return this.normalizeBaseUrl(provider.baseUrl);
+    const format = this.providerFormat(provider);
+    if (format === 'anthropic') return 'https://api.anthropic.com/v1';
+    if (format === 'gemini') return 'https://generativelanguage.googleapis.com/v1beta';
+    return 'https://api.openai.com/v1';
+  }
+
+  private providerAuthHeaders(provider: any, apiKey: string | null): Record<string, string> {
+    const format = this.providerFormat(provider);
+    if (format === 'anthropic') {
+      return {
+        ...(apiKey ? { 'x-api-key': apiKey } : {}),
+        'anthropic-version': '2023-06-01',
+      };
+    }
+    if (format === 'gemini') return {};
+    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  }
+
+  private modelListUrl(provider: any, baseUrl: string, apiKey: string | null): string {
+    if (this.providerFormat(provider) === 'gemini') {
+      const key = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';
+      return `${baseUrl.replace(/\/+$/, '')}/models${key}`;
+    }
+    return `${baseUrl.replace(/\/+$/, '')}/models`;
+  }
+
+  private splitSystemMessages(messages: ChatMessage[]) {
+    const system = messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n\n');
+    const conversation = messages.filter((message) => message.role !== 'system' && message.role !== 'tool');
+    return { system, conversation };
+  }
+
+  private normalizeCompletion(model: string, content: string, usage?: any, finishReason?: string) {
+    return {
+      id: `chatcmpl_${crypto.randomUUID()}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content },
+        finish_reason: finishReason || 'stop',
+      }],
+      usage: {
+        prompt_tokens: usage?.input_tokens || usage?.promptTokenCount || usage?.prompt_tokens || 0,
+        completion_tokens: usage?.output_tokens || usage?.candidatesTokenCount || usage?.completion_tokens || 0,
+        total_tokens: usage?.total_tokens || usage?.totalTokenCount || 0,
+      },
+    };
+  }
+
+  private async anthropicChatCompletion(
+    baseUrl: string,
+    apiKey: string | null,
+    modelSlug: string,
+    messages: ChatMessage[],
+    options?: { temperature?: number; max_tokens?: number },
+  ) {
+    if (!apiKey) throw new AppError(401, 'Anthropic API key is not configured');
+    const { system, conversation } = this.splitSystemMessages(messages);
+    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: modelSlug,
+        system: system || undefined,
+        messages: conversation.map((message) => ({
+          role: message.role === 'assistant' ? 'assistant' : 'user',
+          content: message.content,
+        })),
+        temperature: options?.temperature ?? 0.7,
+        max_tokens: options?.max_tokens ?? 4096,
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new AppError(response.status, `Anthropic provider error: ${errorText}`);
+    }
+
+    const data: any = await response.json();
+    const content = (data.content || [])
+      .map((part: any) => part.type === 'text' ? part.text : '')
+      .join('');
+    return this.normalizeCompletion(data.model || modelSlug, content, data.usage, data.stop_reason);
+  }
+
+  private async geminiChatCompletion(
+    baseUrl: string,
+    apiKey: string | null,
+    modelSlug: string,
+    messages: ChatMessage[],
+    options?: { temperature?: number; max_tokens?: number },
+  ) {
+    if (!apiKey) throw new AppError(401, 'Gemini API key is not configured');
+    const { system, conversation } = this.splitSystemMessages(messages);
+    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(modelSlug)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemInstruction: system ? { parts: [{ text: system }] } : undefined,
+        contents: conversation.map((message) => ({
+          role: message.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: message.content }],
+        })),
+        generationConfig: {
+          temperature: options?.temperature ?? 0.7,
+          maxOutputTokens: options?.max_tokens ?? 4096,
+        },
+      }),
+      signal: AbortSignal.timeout(120000),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new AppError(response.status, `Gemini provider error: ${errorText}`);
+    }
+
+    const data: any = await response.json();
+    const content = (data.candidates?.[0]?.content?.parts || [])
+      .map((part: any) => part.text || '')
+      .join('');
+    return this.normalizeCompletion(modelSlug, content, data.usageMetadata, data.candidates?.[0]?.finishReason);
+  }
+
+  private async geminiEmbeddings(baseUrl: string, apiKey: string | null, modelSlug: string, input: string | string[]) {
+    if (!apiKey) throw new AppError(401, 'Gemini API key is not configured');
+    const values = Array.isArray(input) ? input : [input];
+    const embeddings = [];
+    for (const value of values) {
+      const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/models/${encodeURIComponent(modelSlug)}:embedContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: { parts: [{ text: value }] } }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new AppError(response.status, `Gemini embeddings provider error: ${errorText}`);
+      }
+      const data: any = await response.json();
+      embeddings.push(data.embedding?.values || []);
+    }
+    return {
+      object: 'list',
+      data: embeddings.map((embedding, index) => ({ object: 'embedding', index, embedding })),
+      model: modelSlug,
+      usage: { total_tokens: 0 },
+    };
+  }
 
   private sanitizeProvider(provider: any) {
     return {
@@ -597,8 +1009,10 @@ try {
       models: JSON.parse(provider.models || '[]'),
       config: provider.config ? JSON.parse(provider.config) : null,
       isEnabled: provider.isEnabled,
+      hasKey: !!provider.apiKey,
       createdAt: provider.createdAt,
       updatedAt: provider.updatedAt,
+      // Intentionally NOT exposing apiKey
     };
   }
 

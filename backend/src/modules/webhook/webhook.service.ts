@@ -48,7 +48,7 @@ export class WebhookEventBus {
 
   async processPending(batchSize = 10) {
     const pendingEvents = await prisma.webhookEvent.findMany({
-      where: { status: 'PENDING', attempts: { lt: prisma.webhookEvent.fields?.maxAttempts ? undefined : 3 } },
+      where: { status: 'PENDING', attempts: { lt: 3 } },
       orderBy: { createdAt: 'asc' },
       take: batchSize,
     });
@@ -68,7 +68,12 @@ export class WebhookEventBus {
 
         let delivered = false;
         for (const plugin of enabledPlugins) {
-          const urls: string[] = JSON.parse(plugin.webhookUrls || '[]');
+          let urls: string[] = [];
+          try {
+            urls = JSON.parse(plugin.webhookUrls || '[]');
+          } catch {
+            urls = [];
+          }
           if (urls.length > 0) {
             for (const url of urls) {
               try {

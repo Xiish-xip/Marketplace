@@ -2,6 +2,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { get, post, put, patch, del } from './api-enhanced';
 import toast from 'react-hot-toast';
 import { useAuthStore } from './auth-store';
+import {
+  demoBrandsResponse,
+  demoCategoriesResponse,
+  demoCurrenciesInfoResponse,
+  demoCurrencyRatesResponse,
+  demoCurrencySettingsResponse,
+  demoDetectedCurrencyResponse,
+  demoFeaturedProductsResponse,
+  demoProductResponse,
+  demoProductsResponse,
+  demoPublicConfigResponse,
+  demoSellerStoreResponse,
+  demoSellersResponse,
+} from './demo-catalog';
 
 // Query key factory
 export const queryKeys = {
@@ -63,18 +77,47 @@ export const queryKeys = {
   reviews: {
     product: (productId: string, params?: any) => ['reviews', 'product', productId, params] as const,
   },
+  delivery: {
+    profile: () => ['delivery', 'profile'] as const,
+    available: () => ['delivery', 'available'] as const,
+    mine: () => ['delivery', 'mine'] as const,
+    order: (orderId: string) => ['delivery', 'order', orderId] as const,
+    seller: (params?: any) => ['delivery', 'seller', params] as const,
+    admin: (params?: any) => ['delivery', 'admin', params] as const,
+    persons: () => ['delivery', 'persons'] as const,
+    stats: () => ['delivery', 'stats'] as const,
+    payouts: (params?: any) => ['delivery', 'payouts', params] as const,
+    myPayouts: () => ['delivery', 'my-payouts'] as const,
+  },
   config: {
     all: () => ['config'] as const,
     public: () => ['config', 'public'] as const,
   },
 };
 
+function isPublicCatalogRoute() {
+  if (typeof window === 'undefined') return false;
+  return !window.location.pathname.startsWith('/admin') && !window.location.pathname.startsWith('/seller');
+}
+
+function publicFallback<T>(error: unknown, fallback: T): T {
+  if (isPublicCatalogRoute()) return fallback;
+  throw error;
+}
+
 // ── Products ──
 export function useProducts(params?: any) {
   return useQuery({
     queryKey: queryKeys.products.list(params),
-    queryFn: () => get('/products', params),
+    queryFn: async () => {
+      try {
+        return await get('/products', params);
+      } catch (error) {
+        return publicFallback(error, demoProductsResponse(params));
+      }
+    },
     staleTime: 30000,
+    retry: false,
   });
 }
 
@@ -82,24 +125,45 @@ export function useProduct(idOrSlug: string) {
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(idOrSlug);
   return useQuery({
     queryKey: queryKeys.products.detail(idOrSlug),
-    queryFn: () => get(isUuid ? `/products/${idOrSlug}` : `/products/slug/${idOrSlug}`),
+    queryFn: async () => {
+      try {
+        return await get(isUuid ? `/products/${idOrSlug}` : `/products/slug/${idOrSlug}`);
+      } catch (error) {
+        return publicFallback(error, demoProductResponse(idOrSlug));
+      }
+    },
     enabled: !!idOrSlug,
+    retry: false,
   });
 }
 
 export function useFeaturedProducts() {
   return useQuery({
     queryKey: queryKeys.products.featured(),
-    queryFn: () => get('/products/featured'),
+    queryFn: async () => {
+      try {
+        return await get('/products/featured');
+      } catch (error) {
+        return publicFallback(error, demoFeaturedProductsResponse());
+      }
+    },
     staleTime: 60000,
+    retry: false,
   });
 }
 
 export function useSearchProducts(q: string, params?: any) {
   return useQuery({
     queryKey: queryKeys.products.search(q),
-    queryFn: () => get('/products/search', { q, ...params }),
+    queryFn: async () => {
+      try {
+        return await get('/products/search', { q, ...params });
+      } catch (error) {
+        return publicFallback(error, demoProductsResponse({ ...params, search: q }));
+      }
+    },
     enabled: q.length > 0,
+    retry: false,
   });
 }
 
@@ -107,16 +171,30 @@ export function useSearchProducts(q: string, params?: any) {
 export function useCategories(params?: any) {
   return useQuery({
     queryKey: [...queryKeys.categories.all, params],
-    queryFn: () => get('/categories', params),
+    queryFn: async () => {
+      try {
+        return await get('/categories', params);
+      } catch (error) {
+        return publicFallback(error, demoCategoriesResponse());
+      }
+    },
     staleTime: 120000,
+    retry: false,
   });
 }
 
 export function useCategoryTree() {
   return useQuery({
     queryKey: queryKeys.categories.tree(),
-    queryFn: () => get('/categories/tree'),
+    queryFn: async () => {
+      try {
+        return await get('/categories/tree');
+      } catch (error) {
+        return publicFallback(error, demoCategoriesResponse());
+      }
+    },
     staleTime: 120000,
+    retry: false,
   });
 }
 
@@ -124,24 +202,45 @@ export function useCategoryTree() {
 export function useBrands(params?: any) {
   return useQuery({
     queryKey: [...queryKeys.brands.all(), params],
-    queryFn: () => get('/brands', params),
+    queryFn: async () => {
+      try {
+        return await get('/brands', params);
+      } catch (error) {
+        return publicFallback(error, demoBrandsResponse());
+      }
+    },
     staleTime: 120000,
+    retry: false,
   });
 }
 
 export function useSellers(params?: any) {
   return useQuery({
     queryKey: queryKeys.sellers.list(params),
-    queryFn: () => get('/sellers', params),
+    queryFn: async () => {
+      try {
+        return await get('/sellers', params);
+      } catch (error) {
+        return publicFallback(error, demoSellersResponse(params));
+      }
+    },
     staleTime: 60000,
+    retry: false,
   });
 }
 
 export function useSellerStore(slug?: string) {
   return useQuery({
     queryKey: queryKeys.sellers.store(slug || ''),
-    queryFn: () => get(`/sellers/store/${slug}`),
+    queryFn: async () => {
+      try {
+        return await get(`/sellers/store/${slug}`);
+      } catch (error) {
+        return publicFallback(error, demoSellerStoreResponse(slug || ''));
+      }
+    },
     enabled: !!slug,
+    retry: false,
   });
 }
 
@@ -244,6 +343,53 @@ export function useCancelOrder() {
   });
 }
 
+// ── Delivery ──
+export function useDeliveryProfile() {
+  return useQuery({ queryKey: queryKeys.delivery.profile(), queryFn: () => get('/delivery/profile/me'), retry: false });
+}
+
+export function useAvailableDeliveries() {
+  return useQuery({ queryKey: queryKeys.delivery.available(), queryFn: () => get('/delivery/available'), refetchInterval: 20000 });
+}
+
+export function useMyDeliveries() {
+  return useQuery({ queryKey: queryKeys.delivery.mine(), queryFn: () => get('/delivery/my'), refetchInterval: 20000 });
+}
+
+export function useDeliveryByOrder(orderId?: string) {
+  return useQuery({
+    queryKey: queryKeys.delivery.order(orderId || ''),
+    queryFn: () => get(`/delivery/order/${orderId}`),
+    enabled: !!orderId,
+    retry: false,
+    refetchInterval: 20000,
+  });
+}
+
+export function useSellerDeliveries(params?: any) {
+  return useQuery({ queryKey: queryKeys.delivery.seller(params), queryFn: () => get('/delivery/seller/mine', params), refetchInterval: 30000 });
+}
+
+export function useAdminDeliveries(params?: any) {
+  return useQuery({ queryKey: queryKeys.delivery.admin(params), queryFn: () => get('/delivery', params), refetchInterval: 30000 });
+}
+
+export function useDeliveryPersons() {
+  return useQuery({ queryKey: queryKeys.delivery.persons(), queryFn: () => get('/delivery/persons'), refetchInterval: 30000 });
+}
+
+export function useDeliveryStats() {
+  return useQuery({ queryKey: queryKeys.delivery.stats(), queryFn: () => get('/delivery/stats'), refetchInterval: 30000 });
+}
+
+export function useDeliveryPayouts(params?: any) {
+  return useQuery({ queryKey: queryKeys.delivery.payouts(params), queryFn: () => get('/delivery/payouts', params) });
+}
+
+export function useMyDeliveryPayouts() {
+  return useQuery({ queryKey: queryKeys.delivery.myPayouts(), queryFn: () => get('/delivery/payouts/my') });
+}
+
 // ── Seller ──
 export function useSellerDashboard() {
   return useQuery({ queryKey: queryKeys.seller.dashboard(), queryFn: () => get('/sellers/dashboard') });
@@ -297,8 +443,15 @@ export function useUpdateProduct() {
 export function useProductQuestions(productId?: string) {
   return useQuery({
     queryKey: queryKeys.productQuestions.all(productId || ''),
-    queryFn: () => get(`/products/${productId}/questions`),
+    queryFn: async () => {
+      try {
+        return await get(`/products/${productId}/questions`);
+      } catch (error) {
+        return publicFallback(error, { success: true, data: [], demoMode: true });
+      }
+    },
     enabled: !!productId,
+    retry: false,
   });
 }
 
@@ -314,11 +467,25 @@ export function useAskProductQuestion(productId: string) {
   });
 }
 
+export function useMyProductQuestions() {
+  return useQuery({
+    queryKey: ['products', 'user', 'questions'],
+    queryFn: () => get('/products/user/questions'),
+  });
+}
+
 export function useProductReviews(productId?: string, params?: any) {
   return useQuery({
     queryKey: queryKeys.reviews.product(productId || '', params),
-    queryFn: () => get(`/reviews/product/${productId}`, params),
+    queryFn: async () => {
+      try {
+        return await get(`/reviews/product/${productId}`, params);
+      } catch (error) {
+        return publicFallback(error, { success: true, data: [], pagination: { total: 0 }, demoMode: true });
+      }
+    },
     enabled: !!productId,
+    retry: false,
   });
 }
 
@@ -361,7 +528,130 @@ export function useMarkNotificationRead() {
   });
 }
 
+// ── Follow System ──
+export function useUserPublicProfile(userId: string) {
+  return useQuery({
+    queryKey: ['users', 'profile', userId],
+    queryFn: () => get(`/users/profile/${userId}`),
+    enabled: !!userId,
+  });
+}
+
+export function useFollowers(userId: string) {
+  return useQuery({
+    queryKey: ['users', 'followers', userId],
+    queryFn: () => get(`/users/${userId}/followers`),
+    enabled: !!userId,
+  });
+}
+
+export function useFollowing(userId: string) {
+  return useQuery({
+    queryKey: ['users', 'following', userId],
+    queryFn: () => get(`/users/${userId}/following`),
+    enabled: !!userId,
+  });
+}
+
+export function useFollowUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => post(`/users/${userId}/follow`, {}),
+    onSuccess: (_, userId) => {
+      qc.invalidateQueries({ queryKey: ['users', 'followers', userId] });
+      qc.invalidateQueries({ queryKey: ['users', 'profile', userId] });
+      toast.success('Followed!');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to follow'),
+  });
+}
+
+export function useUnfollowUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => post(`/users/${userId}/unfollow`, {}),
+    onSuccess: (_, userId) => {
+      qc.invalidateQueries({ queryKey: ['users', 'followers', userId] });
+      qc.invalidateQueries({ queryKey: ['users', 'profile', userId] });
+      toast.success('Unfollowed');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to unfollow'),
+  });
+}
+
+// ── Currency ──
+export function useCurrencySettings() {
+  return useQuery({
+    queryKey: ['currency-settings'],
+    queryFn: async () => {
+      try {
+        return await get('/currencies/settings');
+      } catch (error) {
+        return publicFallback(error, demoCurrencySettingsResponse());
+      }
+    },
+    staleTime: 60000,
+    retry: false,
+  });
+}
+
+export function useAllCurrencyRates() {
+  return useQuery({
+    queryKey: ['currency-rates', 'all'],
+    queryFn: async () => {
+      try {
+        return await get('/currencies/all-rates');
+      } catch (error) {
+        return publicFallback(error, demoCurrencyRatesResponse());
+      }
+    },
+    staleTime: 300000, // 5 min cache
+    retry: false,
+  });
+}
+
+export function useCurrenciesInfo() {
+  return useQuery({
+    queryKey: ['currency-info'],
+    queryFn: async () => {
+      try {
+        return await get('/currencies/info');
+      } catch (error) {
+        return publicFallback(error, demoCurrenciesInfoResponse());
+      }
+    },
+    staleTime: 3600000, // 1 hour - rarely changes
+    retry: false,
+  });
+}
+
+export function useDetectedCurrency() {
+  return useQuery({
+    queryKey: ['currency-detected'],
+    queryFn: async () => {
+      try {
+        return await get('/currencies/detect');
+      } catch (error) {
+        return publicFallback(error, demoDetectedCurrencyResponse());
+      }
+    },
+    staleTime: 86400000, // 1 day - user location doesn't change often
+    retry: false,
+  });
+}
+
 // ── Config ──
 export function usePublicConfig() {
-  return useQuery({ queryKey: queryKeys.config.public(), queryFn: () => get('/config/public'), staleTime: 300000 });
+  return useQuery({
+    queryKey: queryKeys.config.public(),
+    queryFn: async () => {
+      try {
+        return await get('/config/public');
+      } catch (error) {
+        return publicFallback(error, demoPublicConfigResponse());
+      }
+    },
+    staleTime: 300000,
+    retry: false,
+  });
 }

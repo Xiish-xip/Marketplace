@@ -107,4 +107,11 @@ export class ReturnService {
 
     return updated;
   }
+
+  async delete(id: string) {
+    const returnRequest = await prisma.returnRequest.findUnique({ where: { id } });
+    if (!returnRequest) throw new NotFoundError('Return request not found');
+    await prisma.returnRequest.delete({ where: { id } });
+    return { message: 'Return request deleted' };
+  }
 }

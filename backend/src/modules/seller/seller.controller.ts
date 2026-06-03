@@ -11,6 +11,11 @@ export const getPublicSellers = asyncHandler(async (req: Request, res: Response)
   res.json({ success: true, ...result });
 });
 
+export const getAllAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const result = await sellerService.findAllAdmin(req.query);
+  res.json({ success: true, ...result });
+});
+
 export const getProfile = asyncHandler(async (req: Request, res: Response) => {
   const profile = await sellerService.getProfile(req.user!.userId);
   res.json({ success: true, data: profile });
@@ -18,6 +23,11 @@ export const getProfile = asyncHandler(async (req: Request, res: Response) => {
 
 export const getByStoreSlug = asyncHandler(async (req: Request, res: Response) => {
   const seller = await sellerService.getByStoreSlug(req.params.slug);
+  res.json({ success: true, data: seller });
+});
+
+export const getById = asyncHandler(async (req: Request, res: Response) => {
+  const seller = await sellerService.getById(req.params.id);
   res.json({ success: true, data: seller });
 });
 
@@ -79,5 +89,15 @@ export const submitKyc = asyncHandler(async (req: Request, res: Response) => {
     throw new ValidationError(result.error.flatten().fieldErrors as Record<string, string[]>);
   }
   const seller = await sellerService.submitKyc(req.user!.userId, result.data);
+  res.json({ success: true, data: seller });
+});
+
+export const approve = asyncHandler(async (req: Request, res: Response) => {
+  const seller = await sellerService.approveSeller(req.params.id);
+  res.json({ success: true, data: seller });
+});
+
+export const suspend = asyncHandler(async (req: Request, res: Response) => {
+  const seller = await sellerService.suspendSeller(req.params.id);
   res.json({ success: true, data: seller });
 });

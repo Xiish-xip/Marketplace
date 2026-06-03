@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { AdminService } from './admin.service';
 import { asyncHandler } from '../../common/middleware';
-import { createRoleSchema, updateRoleSchema, assignRoleSchema, adminQuerySchema } from './admin.validation';
+import { createRoleSchema, updateRoleSchema, assignRoleSchema, adminQuerySchema, auditLogQuerySchema } from './admin.validation';
 import { ValidationError } from '../../common/errors';
 
 const adminService = new AdminService();
@@ -60,7 +60,7 @@ export const assignRole = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const getAuditLogs = asyncHandler(async (req: Request, res: Response) => {
-  const query = adminQuerySchema.safeParse(req.query);
+  const query = auditLogQuerySchema.safeParse(req.query);
   if (!query.success) throw new ValidationError(query.error.flatten().fieldErrors as Record<string, string[]>);
   const result = await adminService.getAuditLogs(query.data);
   res.json({ success: true, ...result });

@@ -60,11 +60,7 @@ npm run prisma:migrate
 npm run prisma:seed
 ```
 
-Seed accounts:
-
-- Admin: `admin@marketplace.com` / `Admin@123`
-- Seller: `seller@marketplace.com` / `Seller@123`
-- Customer: `customer@marketplace.com` / `Customer@123`
+Seed accounts use the emails and passwords configured in your local environment. Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` before running `npm run prisma:seed`.
 
 ## Run The App
 
@@ -78,7 +74,8 @@ npm run dev
 Frontend:
 
 ```bash
-
+cd frontend
+npm run dev
 ```
 
 Open:
@@ -179,6 +176,10 @@ Deployment flow:
 6. Set frontend `VITE_API_URL=https://your-api-domain.com/api`.
 7. Build frontend with `npm run build` and deploy `frontend/dist`.
 
+## Mobile, App Store, And Firebase Plan
+
+See [`docs/APP_RELEASE_AND_FIREBASE_PLAN.md`](docs/APP_RELEASE_AND_FIREBASE_PLAN.md) for the Android Play Store, iOS App Store, optional macOS, and Firebase Spark roadmap.
+
 ## Production Hardening Checklist
 
 - Move uploaded product images to object storage.
@@ -188,3 +189,5 @@ Deployment flow:
 - Add full integration tests against a test database.
 - Add CI to run backend tests and both builds on every push.
 - Add observability: request logs, error tracking, uptime checks, and database backups.
+
+

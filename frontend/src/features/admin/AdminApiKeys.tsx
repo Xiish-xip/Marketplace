@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { FormEvent, useState, useEffect } from 'react';
 import api from '../../lib/api';
+import { useConfirm } from '../../components/ConfirmDialog';
 
 interface ApiKey {
   id: string;
@@ -13,6 +14,7 @@ interface ApiKey {
 }
 
 export default function AdminApiKeys() {
+  const confirmAction = useConfirm();
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -32,7 +34,7 @@ export default function AdminApiKeys() {
 
   useEffect(() => { fetchKeys(); }, []);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = async (e: FormEvent) => {
     e.preventDefault();
     try {
       const payload: any = { name: form.name };
@@ -50,7 +52,13 @@ export default function AdminApiKeys() {
   };
 
   const handleRevoke = async (id: string) => {
-    if (!confirm('Revoke this API key? This action cannot be undone.')) return;
+    const confirmed = await confirmAction({
+      title: 'Revoke API key?',
+      message: 'This key will stop working immediately. The action cannot be undone.',
+      confirmText: 'Revoke',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await api.patch(`/api-keys/${id}/revoke`);
       fetchKeys();

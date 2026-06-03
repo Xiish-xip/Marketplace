@@ -10,6 +10,8 @@ router.post('/provider-session', authenticate, paymentController.createProviderS
 router.post('/', authenticate, paymentController.process);
 router.get('/order/:orderId', authenticate, paymentController.getByOrder);
 router.post('/providers/:providerId/test', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), paymentController.testProvider);
+router.patch('/:id/complete', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), paymentController.complete);
+router.post('/:id/refund', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), paymentController.refund);
 router.get('/', authenticate, authorize('ADMIN', 'SUPER_ADMIN'), paymentController.getAll);
 
 export default router;

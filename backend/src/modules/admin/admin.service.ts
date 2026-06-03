@@ -115,11 +115,28 @@ export class AdminService {
   async getAuditLogs(query: any) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 20;
-    const { action, entity } = query;
+    const { action, entity, search, userId, from, to } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
     if (action) where.action = action;
     if (entity) where.entity = entity;
+    if (userId) where.userId = userId;
+    if (from || to) {
+      where.createdAt = {};
+      if (from) where.createdAt.gte = new Date(from);
+      if (to) where.createdAt.lte = new Date(to);
+    }
+    if (search) {
+      where.OR = [
+        { action: { contains: search, mode: 'insensitive' } },
+        { entity: { contains: search, mode: 'insensitive' } },
+        { entityId: { contains: search } },
+        { details: { contains: search, mode: 'insensitive' } },
+        { user: { firstName: { contains: search, mode: 'insensitive' } } },
+        { user: { lastName: { contains: search, mode: 'insensitive' } } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
 
     const [logs, total] = await Promise.all([
       prisma.auditLog.findMany({

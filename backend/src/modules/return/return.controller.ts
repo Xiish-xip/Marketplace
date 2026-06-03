@@ -38,3 +38,34 @@ export const updateStatus = asyncHandler(async (req: Request, res: Response) => 
   const returnRequest = await returnService.updateStatus(req.params.id, result.data);
   res.json({ success: true, data: returnRequest });
 });
+
+export const approve = asyncHandler(async (req: Request, res: Response) => {
+  const returnRequest = await returnService.updateStatus(req.params.id, {
+    status: 'APPROVED',
+    adminNote: req.body?.adminNote,
+  });
+  res.json({ success: true, data: returnRequest });
+});
+
+export const reject = asyncHandler(async (req: Request, res: Response) => {
+  const returnRequest = await returnService.updateStatus(req.params.id, {
+    status: 'REJECTED',
+    adminNote: req.body?.adminNote,
+  });
+  res.json({ success: true, data: returnRequest });
+});
+
+export const refund = asyncHandler(async (req: Request, res: Response) => {
+  const returnRequest = await returnService.updateStatus(req.params.id, {
+    status: 'REFUNDED',
+    adminNote: req.body?.adminNote,
+    refundAmount: req.body?.refundAmount,
+    refundMethod: req.body?.refundMethod,
+  });
+  res.json({ success: true, data: returnRequest });
+});
+
+export const remove = asyncHandler(async (req: Request, res: Response) => {
+  const result = await returnService.delete(req.params.id);
+  res.json({ success: true, ...result });
+});

@@ -179,7 +179,7 @@ export class ReviewService {
       include: { images: true },
     });
 
-    if (data.rating !== undefined) {
+    if (data.rating !== undefined && review.productId) {
       await this.updateProductRating(review.productId);
     }
     return updated;
@@ -191,7 +191,9 @@ export class ReviewService {
     if (review.userId !== userId) throw new AppError(403, 'Not authorized');
 
     await prisma.review.delete({ where: { id } });
-    await this.updateProductRating(review.productId);
+    if (review.productId) {
+      await this.updateProductRating(review.productId);
+    }
     return { message: 'Review deleted' };
   }
 
@@ -203,7 +205,7 @@ export class ReviewService {
     if (!review) throw new NotFoundError('Review not found');
     if (!this.isAdmin(role)) {
       const sellerId = await this.getSellerIdForUser(userId);
-      if (review.product.sellerId !== sellerId) throw new AppError(403, 'Not authorized');
+      if (!review.product || review.product.sellerId !== sellerId) throw new AppError(403, 'Not authorized');
     }
 
     return prisma.reviewReply.create({
@@ -219,6 +221,16 @@ export class ReviewService {
       where: { id },
       data: { isApproved: !review.isApproved },
     });
+  }
+
+  async setApproval(id: string, isApproved: boolean) {
+    const review = await prisma.review.findUnique({ where: { id } });
+    if (!review) throw new NotFoundError('Review not found');
+    const updated = await prisma.review.update({ where: { id }, data: { isApproved } });
+    if (review.productId) {
+      await this.updateProductRating(review.productId);
+    }
+    return updated;
   }
 
   private async updateProductRating(productId: string) {

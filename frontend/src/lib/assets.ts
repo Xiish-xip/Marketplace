@@ -14,7 +14,7 @@ export function assetUrl(value?: string | null) {
   if (/^https?:\/\//i.test(value)) {
     try {
       const parsed = new URL(value);
-      if (parsed.pathname.startsWith('/uploads/') && ['localhost', '127.0.0.1', '::1'].includes(parsed.hostname)) {
+      if (parsed.pathname.startsWith('/uploads/')) {
         if (!HAS_EXPLICIT_API_URL) return parsed.pathname;
         return `${getApiOrigin()}${parsed.pathname}`;
       }
@@ -38,8 +38,14 @@ export function storedUploadPath(image: any) {
   if (!value) return '';
   try {
     const parsed = new URL(value);
-    return parsed.pathname.startsWith('/uploads/') ? parsed.pathname : value;
+    if (parsed.pathname.startsWith('/uploads/')) {
+      return parsed.pathname;
+    }
   } catch {
-    return value;
+    // Not a URL, check if it's already a path
+    if (value.startsWith('/uploads/')) {
+      return value;
+    }
   }
+  return value;
 }

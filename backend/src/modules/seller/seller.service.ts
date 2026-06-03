@@ -50,6 +50,39 @@ export class SellerService {
     };
   }
 
+  async findAllAdmin(query: any) {
+    const page = Number(query.page || 1);
+    const limit = Number(query.limit || 20);
+    const skip = (page - 1) * limit;
+    const search = query.search as string | undefined;
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { storeName: { contains: search } },
+        { storeDescription: { contains: search } },
+        { storeLocation: { contains: search } },
+        { user: { email: { contains: search } } },
+      ];
+    }
+    if (query.status) where.kycStatus = query.status;
+
+    const [sellers, total] = await Promise.all([
+      prisma.seller.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          user: { select: { id: true, email: true, firstName: true, lastName: true, phone: true } },
+          _count: { select: { products: true, orders: true, reviews: true } },
+        },
+      }),
+      prisma.seller.count({ where }),
+    ]);
+
+    return { data: sellers, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
   async getProfile(userId: string) {
     const seller = await prisma.seller.findUnique({
       where: { userId },
@@ -67,6 +100,28 @@ export class SellerService {
     const seller = await prisma.seller.findUnique({
       where: { storeSlug: slug },
       include: {
+        _count: { select: { products: true } },
+        storefrontSections: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } },
+        products: {
+          where: { isActive: true, status: 'ACTIVE' },
+          take: 12,
+          orderBy: { createdAt: 'desc' },
+          include: {
+            images: { where: { isPrimary: true }, take: 1 },
+            _count: { select: { reviews: true } },
+          },
+        },
+      },
+    });
+    if (!seller) throw new NotFoundError('Seller not found');
+    return seller;
+  }
+
+  async getById(id: string) {
+    const seller = await prisma.seller.findUnique({
+      where: { id },
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, avatar: true, role: true } },
         _count: { select: { products: true } },
         storefrontSections: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } },
         products: {
@@ -295,15 +350,36 @@ export class SellerService {
     const days = daysMap[period] || 30;
     const startDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    const orders = await prisma.order.findMany({
-      where: {
-        sellerId: seller.id,
-        createdAt: { gte: startDate },
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    const [orders, products, reviews, productStats] = await Promise.all([
+      prisma.order.findMany({
+        where: { sellerId: seller.id, createdAt: { gte: startDate } },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          user: { select: { id: true, firstName: true, lastName: true, email: true } },
+          items: { include: { product: { select: { id: true, title: true, basePrice: true } } } },
+        },
+      }),
+      prisma.product.findMany({
+        where: { sellerId: seller.id },
+        include: {
+          _count: { select: { reviews: true, orderItems: true } },
+          images: { take: 1, where: { isPrimary: true } },
+        },
+      }),
+      prisma.review.count({
+        where: { sellerId: seller.id, createdAt: { gte: startDate } },
+      }),
+      prisma.orderItem.groupBy({
+        by: ['productId'],
+        where: { product: { sellerId: seller.id }, order: { createdAt: { gte: startDate } } },
+        _sum: { quantity: true },
+        _count: true,
+        orderBy: { _sum: { quantity: 'desc' } },
+        take: 10,
+      }),
+    ]);
 
-    // Group by date for chart
+    // ── Sales by date ──
     const salesByDate = orders.reduce((acc: Record<string, { orders: number; revenue: number }>, order) => {
       const date = order.createdAt.toISOString().split('T')[0];
       if (!acc[date]) acc[date] = { orders: 0, revenue: 0 };
@@ -312,12 +388,103 @@ export class SellerService {
       return acc;
     }, {});
 
+    // ── Product insights ──
+    const topProducts = productStats.map((stat) => {
+      const product = products.find((p) => p.id === stat.productId);
+      return {
+        id: stat.productId,
+        title: product?.title || 'Unknown',
+        image: product?.images?.[0]?.url || null,
+        price: product?.basePrice || 0,
+        totalSold: stat._sum.quantity || 0,
+        orderCount: stat._count,
+        reviewCount: product?._count.reviews || 0,
+      };
+    });
+
+    // ── Customer insights ──
+    const buyerMap = new Map<string, { firstName: string; lastName: string; email: string | null; orderCount: number; totalSpent: number; lastOrder: Date }>();
+    for (const order of orders) {
+      const uid = order.userId;
+      const existing = buyerMap.get(uid);
+      if (existing) {
+        existing.orderCount++;
+        existing.totalSpent += order.totalAmount;
+        if (order.createdAt > existing.lastOrder) existing.lastOrder = order.createdAt;
+      } else {
+        buyerMap.set(uid, {
+          firstName: order.user?.firstName || 'Unknown',
+          lastName: order.user?.lastName || '',
+          email: order.user?.email || null,
+          orderCount: 1,
+          totalSpent: order.totalAmount,
+          lastOrder: order.createdAt,
+        });
+      }
+    }
+    const topCustomers = Array.from(buyerMap.entries())
+      .sort((a, b) => b[1].totalSpent - a[1].totalSpent)
+      .slice(0, 10)
+      .map(([id, data]) => ({ id, ...data }));
+
+    // ── Revenue by status ──
+    const revenueByStatus = orders.reduce((acc: Record<string, number>, order) => {
+      acc[order.status] = (acc[order.status] || 0) + order.totalAmount;
+      return acc;
+    }, {});
+
+    // ── Orders by status ──
+    const ordersByStatus = orders.reduce((acc: Record<string, number>, order) => {
+      acc[order.status] = (acc[order.status] || 0) + 1;
+      return acc;
+    }, {});
+
+    // ── Low stock products (query separately) ──
+    const lowStockProducts = await prisma.productVariant.findMany({
+      where: {
+        product: { sellerId: seller.id },
+        stock: { gt: 0 },
+        isActive: true,
+      },
+      select: {
+        id: true,
+        sku: true,
+        stock: true,
+        lowStockThreshold: true,
+        attributes: true,
+        product: { select: { id: true, title: true, images: { take: 1, where: { isPrimary: true }, select: { url: true } } } },
+      },
+    });
+    const filteredLowStock = lowStockProducts
+      .filter((v) => v.stock <= (v.lowStockThreshold || 5))
+      .slice(0, 10);
+
+    // ── Summary stats ──
+    const totalRevenue = orders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const totalOrders = orders.length;
+    const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
+    const totalProducts = products.length;
+    const avgRating = products.length > 0 ? products.reduce((sum, p) => sum + (p.rating || 0), 0) / products.length : 0;
+
     return {
       period,
-      totalOrders: orders.length,
-      totalRevenue: orders.reduce((sum, o) => sum + o.totalAmount, 0),
-      avgOrderValue: orders.length > 0 ? orders.reduce((sum, o) => sum + o.totalAmount, 0) / orders.length : 0,
+      summary: {
+        totalRevenue,
+        totalOrders,
+        avgOrderValue,
+        totalProducts,
+        totalReviews: reviews,
+        avgRating: Math.round(avgRating * 10) / 10,
+        uniqueCustomers: buyerMap.size,
+        responseRate: seller.responseRate,
+        sellerRating: seller.rating,
+      },
       salesByDate: Object.entries(salesByDate).map(([date, data]) => ({ date, ...data })),
+      revenueByStatus,
+      ordersByStatus,
+      topProducts,
+      topCustomers,
+      lowStockProducts: filteredLowStock,
     };
   }
 
@@ -344,6 +511,25 @@ export class SellerService {
         kycStatus: 'SUBMITTED',
         kycDocuments: JSON.stringify(data.documents),
       },
+    });
+  }
+
+  async approveSeller(id: string) {
+    const seller = await prisma.seller.findUnique({ where: { id } });
+    if (!seller) throw new NotFoundError('Seller not found');
+    await prisma.user.update({ where: { id: seller.userId }, data: { role: 'SELLER', isActive: true } });
+    return prisma.seller.update({
+      where: { id },
+      data: { kycStatus: 'VERIFIED', isVerified: true, isActive: true },
+    });
+  }
+
+  async suspendSeller(id: string) {
+    const seller = await prisma.seller.findUnique({ where: { id } });
+    if (!seller) throw new NotFoundError('Seller not found');
+    return prisma.seller.update({
+      where: { id },
+      data: { kycStatus: 'SUSPENDED', isActive: false },
     });
   }
 }

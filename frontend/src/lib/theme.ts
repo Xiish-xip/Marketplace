@@ -3,7 +3,9 @@ export type ThemePreset = {
   label: string;
   description: string;
   homeTemplate: string;
+  fontFamily?: string;
   variables: Record<string, string>;
+  darkVariables?: Record<string, string>;
 };
 
 export const themePresets: ThemePreset[] = [
@@ -25,6 +27,19 @@ export const themePresets: ThemePreset[] = [
       '--color-primary-900': '124 45 18',
       '--color-accent-600': '22 163 74',
     },
+    darkVariables: {
+      '--color-primary-50': '255 247 237',
+      '--color-primary-100': '255 237 213',
+      '--color-primary-200': '254 215 170',
+      '--color-primary-300': '253 186 116',
+      '--color-primary-400': '251 146 60',
+      '--color-primary-500': '249 115 22',
+      '--color-primary-600': '251 146 60',
+      '--color-primary-700': '253 186 116',
+      '--color-primary-800': '255 237 213',
+      '--color-primary-900': '255 247 237',
+      '--color-accent-600': '74 222 128',
+    },
   },
   {
     id: 'trade-pro',
@@ -43,6 +58,19 @@ export const themePresets: ThemePreset[] = [
       '--color-primary-800': '30 64 175',
       '--color-primary-900': '30 58 138',
       '--color-accent-600': '8 145 178',
+    },
+    darkVariables: {
+      '--color-primary-50': '239 246 255',
+      '--color-primary-100': '219 234 254',
+      '--color-primary-200': '191 219 254',
+      '--color-primary-300': '147 197 253',
+      '--color-primary-400': '96 165 250',
+      '--color-primary-500': '59 130 246',
+      '--color-primary-600': '96 165 250',
+      '--color-primary-700': '147 197 253',
+      '--color-primary-800': '219 234 254',
+      '--color-primary-900': '239 246 255',
+      '--color-accent-600': '34 211 238',
     },
   },
   {
@@ -63,6 +91,19 @@ export const themePresets: ThemePreset[] = [
       '--color-primary-900': '20 83 45',
       '--color-accent-600': '234 88 12',
     },
+    darkVariables: {
+      '--color-primary-50': '240 253 244',
+      '--color-primary-100': '220 252 231',
+      '--color-primary-200': '187 247 208',
+      '--color-primary-300': '134 239 172',
+      '--color-primary-400': '74 222 128',
+      '--color-primary-500': '34 197 94',
+      '--color-primary-600': '74 222 128',
+      '--color-primary-700': '134 239 172',
+      '--color-primary-800': '220 252 231',
+      '--color-primary-900': '240 253 244',
+      '--color-accent-600': '251 146 60',
+    },
   },
   {
     id: 'mono-luxe',
@@ -82,14 +123,32 @@ export const themePresets: ThemePreset[] = [
       '--color-primary-900': '17 24 39',
       '--color-accent-600': '217 119 6',
     },
+    darkVariables: {
+      '--color-primary-50': '249 250 251',
+      '--color-primary-100': '243 244 246',
+      '--color-primary-200': '229 231 235',
+      '--color-primary-300': '209 213 219',
+      '--color-primary-400': '156 163 175',
+      '--color-primary-500': '107 114 128',
+      '--color-primary-600': '209 213 219',
+      '--color-primary-700': '229 231 235',
+      '--color-primary-800': '243 244 246',
+      '--color-primary-900': '249 250 251',
+      '--color-accent-600': '251 191 36',
+    },
   },
 ];
 
-export function resolveTheme(themeConfig: any) {
+export function resolveTheme(themeConfig: any, mode: 'light' | 'dark' = 'light') {
   const preset = themePresets.find((item) => item.id === themeConfig?.presetId) || themePresets[0];
+  const customModeVariables = mode === 'dark'
+    ? (themeConfig?.darkVariables || themeConfig?.modes?.dark?.variables || {})
+    : (themeConfig?.lightVariables || themeConfig?.modes?.light?.variables || {});
+  const presetModeVariables = mode === 'dark' ? (preset.darkVariables || preset.variables) : preset.variables;
   return {
     ...preset,
     ...themeConfig,
-    variables: { ...preset.variables, ...(themeConfig?.variables || {}) },
+    fontFamily: themeConfig?.fontFamily || preset.fontFamily || "'Inter', system-ui, -apple-system, sans-serif",
+    variables: { ...presetModeVariables, ...(themeConfig?.variables || {}), ...customModeVariables },
   };
 }

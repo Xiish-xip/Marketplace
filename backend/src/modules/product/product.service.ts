@@ -31,16 +31,30 @@ export class ProductService {
     if (productSellerId !== sellerId) throw new AppError(403, 'Not authorized');
   }
 
+  private async attachAssetImages<T extends { id: string; images?: any[] }>(products: T[]): Promise<T[]> {
+    if (products.length === 0) return products;
+    const assets = await prisma.asset.findMany({
+      where: { entityType: 'product', entityId: { in: products.map((product) => product.id) }, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const byProduct = new Map<string, any[]>();
+    for (const asset of assets) {
+      if (!asset.entityId) continue;
+      byProduct.set(asset.entityId, [...(byProduct.get(asset.entityId) || []), asset]);
+    }
+    return products.map((product) => ({ ...product, images: byProduct.get(product.id) || product.images || [] }));
+  }
+
   async findAll(query: any) {
-    const { page, limit, search, categoryId, brandId, sellerId, minPrice, maxPrice, status, isActive, isFeatured, sortBy, sortOrder, inStock, rating } = query;
+    const { page, limit, search, categoryId, brandId, sellerId, minPrice, maxPrice, status, isActive, isFeatured, sortBy, sortOrder, inStock, rating, excludeId } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ProductWhereInput = {};
 
     if (search) {
       where.OR = [
-        { title: { contains: search } },
-        { description: { contains: search } },
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
       ];
     }
     if (categoryId) where.categoryId = categoryId;
@@ -57,8 +71,22 @@ export class ProductService {
     } else if (inStock === 'false') {
       where.variants = { none: { stock: { gt: 0 }, isActive: true } };
     }
+    if (excludeId) {
+      where.id = { not: excludeId };
+    }
 
-    const orderBy = sortBy && sortOrder ? { [sortBy]: sortOrder } : { updatedAt: 'desc' as const };
+    // Map frontend sortBy names to Prisma field names
+    const sortFieldMap: Record<string, string> = {
+      'soldCount': 'totalSales',
+      'createdAt': 'createdAt',
+      'updatedAt': 'updatedAt',
+      'basePrice': 'basePrice',
+      'discountPrice': 'discountPrice',
+      'rating': 'rating',
+      'title': 'title',
+    };
+    const prismaSortBy = sortFieldMap[sortBy] || sortBy;
+    const orderBy = prismaSortBy && sortOrder ? { [prismaSortBy]: sortOrder } : { updatedAt: 'desc' as const };
 
     const [products, total] = await Promise.all([
       prisma.product.findMany({
@@ -79,7 +107,7 @@ export class ProductService {
     ]);
 
     return {
-      data: products,
+      data: await this.attachAssetImages(products),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -97,7 +125,7 @@ export class ProductService {
       },
     });
     if (!product) throw new NotFoundError('Product not found');
-    return product;
+    return (await this.attachAssetImages([product]))[0];
   }
 
   async findBySlug(slug: string) {
@@ -121,7 +149,7 @@ export class ProductService {
       },
     });
     if (!product) throw new NotFoundError('Product not found');
-    return product;
+    return (await this.attachAssetImages([product]))[0];
   }
 
   async findSellerProducts(userId: string, query: any) {
@@ -446,7 +474,11 @@ export class ProductService {
     if (!product) throw new NotFoundError('Product not found');
     await this.ensureCanMutateProduct(product.sellerId, user);
 
-    await prisma.product.delete({ where: { id } });
+    // Soft-delete: set inactive and mark as DELETED to preserve order history
+    await prisma.product.update({
+      where: { id },
+      data: { isActive: false, status: 'DELETED' },
+    });
     await this.removeProductFromIndex(id);
     return { message: 'Product deleted successfully' };
   }
@@ -502,14 +534,53 @@ export class ProductService {
   async getQuestions(productId: string) {
     return prisma.productQuestion.findMany({
       where: { productId },
+      include: {
+        product: { select: { id: true, title: true, slug: true } },
+        answerer: { select: { id: true, firstName: true, lastName: true } },
+        user: { select: { id: true, firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async getUserQuestions(userId: string) {
+    return prisma.productQuestion.findMany({
+      where: { userId },
+      include: {
+        product: { select: { id: true, title: true, slug: true } },
+        answerer: { select: { id: true, firstName: true, lastName: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async askQuestion(productId: string, userId: string, question: string) {
-    const product = await prisma.product.findUnique({ where: { id: productId } });
+    const product = await prisma.product.findUnique({
+      where: { id: productId },
+      include: { seller: { select: { userId: true } } },
+    });
     if (!product || !product.isActive || product.status !== 'ACTIVE') throw new NotFoundError('Product not found');
-    return prisma.productQuestion.create({ data: { productId, userId, question } });
+
+    const created = await prisma.productQuestion.create({ data: { productId, userId, question } });
+
+    if (product.seller?.userId) {
+      await prisma.notification.create({
+        data: {
+          userId: product.seller.userId,
+          type: 'PRODUCT_QUESTION',
+          title: `New question for ${product.title}`,
+          body: question,
+          data: JSON.stringify({
+            productId: product.id,
+            productSlug: product.slug,
+            questionId: created.id,
+            link: '/seller/qa',
+          }),
+        },
+      });
+    }
+
+    return created;
   }
 
   async answerQuestion(questionId: string, user: AuthPayload, answer: string) {
@@ -517,14 +588,32 @@ export class ProductService {
     if (!question) throw new NotFoundError('Question not found');
     const product = await prisma.product.findUnique({
       where: { id: question.productId },
-      select: { sellerId: true },
+      select: { id: true, title: true, slug: true, seller: { select: { userId: true } } },
     });
     if (!product) throw new NotFoundError('Product not found');
-    await this.ensureCanMutateProduct(product.sellerId, user);
-    return prisma.productQuestion.update({
+    await this.ensureCanMutateProduct(product.seller?.userId || '', user);
+
+    const updated = await prisma.productQuestion.update({
       where: { id: questionId },
       data: { answer, answeredBy: user.userId, answeredAt: new Date() },
     });
+
+    await prisma.notification.create({
+      data: {
+        userId: question.userId,
+        type: 'PRODUCT_QUESTION_ANSWER',
+        title: `Seller answered your question on ${product.title}`,
+        body: answer,
+        data: JSON.stringify({
+          productId: product.id,
+          productSlug: product.slug,
+          questionId: updated.id,
+          link: `/products/${product.slug}#qa`,
+        }),
+      },
+    });
+
+    return updated;
   }
 
   private async indexProduct(productId: string) {

@@ -213,6 +213,28 @@ export class SecureToolRunner {
     handlers.set('update_ticket_status', (args) =>
       this.toolsService.updateTicketStatus(args.ticketId, args.status));
 
+    // ── New Admin Write Handlers ──
+    handlers.set('update_product_stock', (args) =>
+      this.toolsService.updateProductStock(args.productIdOrSlug, args.stock, args.variantId));
+    handlers.set('update_product_field', (args) =>
+      this.toolsService.updateProductField(args.productIdOrSlug, args.fields));
+    handlers.set('update_user_role', (args) =>
+      this.toolsService.updateUserRole(args.userIdOrEmail, args.role));
+    handlers.set('update_seller_profile_admin', (args) =>
+      this.toolsService.adminUpdateSellerProfile(args.sellerIdentifier, args.fields));
+    handlers.set('create_support_ticket', (args) =>
+      this.toolsService.createSupportTicket(args.userIdOrEmail, args.subject, args.description));
+    handlers.set('toggle_announcement_admin', (args) =>
+      this.toolsService.aiToggleAnnouncement(args.announcementId));
+    handlers.set('set_product_active', (args) =>
+      this.toolsService.setProductActive(args.productIdOrSlug, args.isActive, args.status));
+    handlers.set('update_order_status_admin', (args) =>
+      this.toolsService.updateOrderStatusAdmin(args.orderIdOrNumber, args.status));
+    handlers.set('get_active_orders_count', () =>
+      this.toolsService.getActiveOrdersCount());
+    handlers.set('list_active_products', (args) =>
+      this.toolsService.listActiveProducts(args.categorySlug, args.limit, args.page));
+
     this.registry.registerBuiltinHandlers(handlers);
   }
 

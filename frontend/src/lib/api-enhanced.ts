@@ -1,19 +1,27 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import toast from 'react-hot-toast';
 import { useAuthStore } from './auth-store';
+import { getCsrfToken } from './csrf';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+export const API_BASE_URL = import.meta.env.DEV
+  ? '/api'
+  : (import.meta.env.VITE_API_URL || `https://marketplace-api.onrender.com/api`);
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 30000,
+  withCredentials: true,
 });
 
-// Request interceptor - attach token
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+// Request interceptor - attach auth and CSRF tokens
+api.interceptors.request.use(async (config: InternalAxiosRequestConfig) => {
   const token = useAuthStore.getState().accessToken;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (['post', 'put', 'patch', 'delete'].includes((config.method || 'get').toLowerCase())) {
+    const csrfToken = await getCsrfToken();
+    if (csrfToken) config.headers['X-CSRF-Token'] = csrfToken;
   }
   if (config.data instanceof FormData) {
     // Axios automatically sets correct Content-Type with boundary for FormData
@@ -37,7 +45,11 @@ api.interceptors.response.use(
       try {
         const refreshToken = useAuthStore.getState().refreshToken;
         if (refreshToken) {
-          const res = await axios.post(`${API_BASE_URL}/auth/refresh-token`, { refreshToken });
+          const csrfToken = await getCsrfToken();
+          const res = await axios.post(`${API_BASE_URL}/auth/refresh-token`, { refreshToken }, {
+            withCredentials: true,
+            headers: csrfToken ? { 'X-CSRF-Token': csrfToken } : undefined,
+          });
           const newTokens = res.data.data;
           useAuthStore.getState().setTokens(newTokens.accessToken, newTokens.refreshToken);
           
@@ -51,7 +63,10 @@ api.interceptors.response.use(
     }
 
     const message = error.response?.data?.message || error.message || 'An error occurred';
-    if (error.response?.status !== 401) {
+    const method = (originalRequest?.method || 'get').toLowerCase();
+    // Suppress 403 toast for page-builder admin routes - ProtectedLayout handles redirect
+    // GET queries can provide local fallbacks while the hosted API is not connected.
+    if (method !== 'get' && error.response?.status !== 401 && error.response?.status !== 403) {
       toast.error(message);
     }
     return Promise.reject(error);

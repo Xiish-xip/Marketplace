@@ -1,30 +1,32 @@
-import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
-import { AlertTriangle, CheckCircle2, CreditCard, FileText, Flag, Globe2, Home, Images, KeyRound, Link as LinkIcon, LogIn, Navigation, Package, Palette, Plus, Rocket, Save, Settings, TestTube2, Trash2, Upload, X, ChevronDown } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, CreditCard, FileText, Flag, Globe2, Home, Images, KeyRound, Link as LinkIcon, LogIn, Navigation, Package, Palette, Plus, Rocket, Save, Settings, TestTube2, Trash2, Upload } from 'lucide-react';
+import RichTextEditor from '../../components/RichTextEditor';
 import { api, get, post, put, del } from '../../lib/api-enhanced';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import { themePresets } from '../../lib/theme';
-import { assetUrl } from '../../lib/assets';
 import toast from 'react-hot-toast';
+import UniversalMediaField from '../../components/UniversalMediaField';
+import { useNavigate } from 'react-router-dom';
 
-const paymentTemplates: Record<string, any> = {
-  stripe: { id: 'stripe', label: 'Stripe', method: 'CARD', enabled: false, mode: 'test', publishableKey: '', secretKey: '', webhookSecret: '', checkoutUrl: '' },
-  paypal: { id: 'paypal', label: 'PayPal', method: 'CARD', enabled: false, mode: 'test', clientId: '', clientSecret: '', webhookSecret: '', checkoutUrl: '' },
-  mpesa: { id: 'mpesa', label: 'M-Pesa', method: 'MOBILE_MONEY', enabled: false, mode: 'test', consumerKey: '', consumerSecret: '', passkey: '', shortcode: '', callbackUrl: '' },
-  flutterwave: { id: 'flutterwave', label: 'Flutterwave', method: 'CARD', enabled: false, mode: 'test', publicKey: '', secretKey: '', encryptionKey: '', checkoutUrl: '' },
-};
+const paymentTemplateOptions = [
+  { id: 'stripe', label: 'Stripe', method: 'CARD' },
+  { id: 'paypal', label: 'PayPal', method: 'CARD' },
+  { id: 'mpesa', label: 'M-Pesa', method: 'MOBILE_MONEY' },
+  { id: 'flutterwave', label: 'Flutterwave', method: 'CARD' },
+];
 
-const loginTemplates: Record<string, any> = {
-  google: { id: 'google', label: 'Google', enabled: false, mode: 'test', clientId: '', clientSecret: '', authUrl: '', brandColor: '#DC4A3F', brandIcon: 'G' },
-  facebook: { id: 'facebook', label: 'Facebook', enabled: false, mode: 'test', clientId: '', clientSecret: '', authUrl: '', brandColor: '#1877F2', brandIcon: 'F' },
-  apple: { id: 'apple', label: 'Apple', enabled: false, mode: 'test', clientId: '', teamId: '', keyId: '', privateKey: '', authUrl: '', brandColor: '#000000', brandIcon: '🍎' },
-  twitter: { id: 'twitter', label: 'X (Twitter)', enabled: false, mode: 'test', clientId: '', clientSecret: '', authUrl: '', brandColor: '#000000', brandIcon: 'X' },
-  github: { id: 'github', label: 'GitHub', enabled: false, mode: 'test', clientId: '', clientSecret: '', authUrl: '', brandColor: '#24292F', brandIcon: 'GH' },
-  microsoft: { id: 'microsoft', label: 'Microsoft', enabled: false, mode: 'test', clientId: '', clientSecret: '', authUrl: '', brandColor: '#00A4EF', brandIcon: 'MS' },
-  linkedin: { id: 'linkedin', label: 'LinkedIn', enabled: false, mode: 'test', clientId: '', clientSecret: '', authUrl: '', brandColor: '#0A66C2', brandIcon: 'in' },
-};
+const loginProviderSuggestions = [
+  { id: 'google', label: 'Google', brandColor: '#DC4A3F', brandIcon: 'G' },
+  { id: 'facebook', label: 'Facebook', brandColor: '#1877F2', brandIcon: 'F' },
+  { id: 'apple', label: 'Apple', brandColor: '#000000', brandIcon: 'A' },
+  { id: 'twitter', label: 'X (Twitter)', brandColor: '#000000', brandIcon: 'X' },
+  { id: 'github', label: 'GitHub', brandColor: '#24292F', brandIcon: 'GH' },
+  { id: 'microsoft', label: 'Microsoft', brandColor: '#00A4EF', brandIcon: 'MS' },
+  { id: 'linkedin', label: 'LinkedIn', brandColor: '#0A66C2', brandIcon: 'in' },
+];
 
-const oauthIcons: Record<string, string> = {
+const oauthIconFallbacks: Record<string, string> = {
   google: 'G',
   facebook: 'F',
   apple: 'A',
@@ -54,46 +56,6 @@ function Field({ label, value, onChange, type = 'text', placeholder }: { label: 
         <input type={type} value={value ?? ''} onChange={(event) => onChange(type === 'number' ? Number(event.target.value) : event.target.value)} className="input-field" placeholder={placeholder} />
       )}
     </label>
-  );
-}
-
-function MediaField({ label, value, onChange, accept = 'image/*,.svg,.ico', preview = true }: { label: string; value: any; onChange: (value: string) => void; accept?: string; preview?: boolean }) {
-  const [uploading, setUploading] = useState(false);
-  const uploadFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    event.currentTarget.value = '';
-    if (!file) return;
-    setUploading(true);
-    try {
-      const payload = new FormData();
-      payload.append('images', file);
-      const res = await api.post('/upload/images', payload);
-      const uploaded = res.data?.data?.[0];
-      if (!uploaded?.path && !uploaded?.url) throw new Error('Upload did not return an asset path');
-      onChange(uploaded.path || uploaded.url);
-      toast.success('Asset uploaded');
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || err.message || 'Asset upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
-  return (
-    <div className="space-y-2">
-      <Field label={label} value={value} onChange={onChange} placeholder="Upload a file or paste https://... / /uploads/..." />
-      <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-        <label className="flex cursor-pointer items-center justify-center rounded-lg border border-dashed px-3 py-2 text-sm font-medium transition-colors" style={{ borderColor: 'rgb(var(--color-border-strong))', backgroundColor: 'rgb(var(--color-surface-muted))', color: 'rgb(var(--color-text-secondary))' }}>
-          {uploading ? 'Uploading...' : 'Choose file'}
-          <input type="file" accept={accept} disabled={uploading} onChange={uploadFile} className="hidden" />
-        </label>
-        {value && <button type="button" onClick={() => onChange('')} className="btn-secondary btn-sm"><X className="h-4 w-4" /> Clear</button>}
-      </div>
-      {preview && value && (
-        <div className="overflow-hidden rounded-lg border" style={{ borderColor: 'rgb(var(--color-border))', backgroundColor: 'rgb(var(--color-surface-muted))' }}>
-          <img src={assetUrl(value)} alt="" className="h-32 w-full object-contain p-2" />
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -169,8 +131,8 @@ function SiteIdentity({ config, onSave, saving }: { config: any; onSave: (value:
           <h4 className="mb-4 font-semibold" style={{ color: 'rgb(var(--color-text))' }}>Branding</h4>
           <div className="space-y-4">
             <Field label="Site name" value={draft.name} onChange={(value) => set('name', value)} />
-            <MediaField label="Logo image" value={draft.logoUrl} onChange={(value) => set('logoUrl', value)} />
-            <MediaField label="Favicon / icon" value={draft.faviconUrl} onChange={(value) => set('faviconUrl', value)} accept="image/*,.svg,.ico" />
+            <UniversalMediaField label="Logo image" value={draft.logoUrl} onChange={(value) => set('logoUrl', value)} />
+            <UniversalMediaField label="Favicon / icon" value={draft.faviconUrl} onChange={(value) => set('faviconUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon,.jpg,.jpeg,.png,.webp,.gif,.ico" />
             <Field label="Public description" value={draft.description} onChange={(value) => set('description', value)} type="textarea" />
           </div>
         </div>
@@ -200,6 +162,7 @@ function ThemeSettings({ config, onSave, saving }: { config: any; onSave: (value
     ...config,
   }));
   const selected = themePresets.find((preset) => preset.id === draft.presetId) || themePresets[0];
+  const homeTemplateOptions = useMemo(() => Array.from(new Set(themePresets.map((preset) => preset.homeTemplate))).map((homeTemplate) => ({ id: homeTemplate, label: homeTemplate.replace(/-/g, ' ') })), []);
   const selectPreset = (presetId: string) => {
     const preset = themePresets.find((item) => item.id === presetId) || themePresets[0];
     setDraft({ ...draft, presetId, homeTemplate: preset.homeTemplate, variables: {} });
@@ -226,7 +189,7 @@ function ThemeSettings({ config, onSave, saving }: { config: any; onSave: (value
           <h4 className="mb-4 font-semibold" style={{ color: 'rgb(var(--color-text))' }}>Active Theme</h4>
           <div className="space-y-4">
             <Field label="Preset" value={selected.label} onChange={() => undefined} />
-            <label><span className="mb-1 block text-sm font-medium" style={{ color: 'rgb(var(--color-text-secondary))' }}>Home template</span><select value={draft.homeTemplate} onChange={(event) => setDraft({ ...draft, homeTemplate: event.target.value })} className="select-field"><option value="dense-marketplace">Dense marketplace</option><option value="supplier-desk">Supplier desk</option><option value="retail-grid">Retail grid</option><option value="editorial-grid">Editorial grid</option></select></label>
+            <label><span className="mb-1 block text-sm font-medium" style={{ color: 'rgb(var(--color-text-secondary))' }}>Home template</span><select value={draft.homeTemplate} onChange={(event) => setDraft({ ...draft, homeTemplate: event.target.value })} className="select-field">{homeTemplateOptions.map((option) => (<option key={option.id} value={option.id}>{option.label}</option>))}</select></label>
             <label><span className="mb-1 block text-sm font-medium" style={{ color: 'rgb(var(--color-text-secondary))' }}>Interface density</span><select value={draft.density} onChange={(event) => setDraft({ ...draft, density: event.target.value })} className="select-field"><option value="dense">Dense</option><option value="comfortable">Comfortable</option><option value="spacious">Spacious</option></select></label>
             <label><span className="mb-1 block text-sm font-medium" style={{ color: 'rgb(var(--color-text-secondary))' }}>Corner radius</span><select value={draft.cornerRadius} onChange={(event) => setDraft({ ...draft, cornerRadius: event.target.value })} className="select-field"><option value="compact">Compact</option><option value="standard">Standard</option><option value="soft">Soft</option></select></label>
           </div>
@@ -238,6 +201,7 @@ function ThemeSettings({ config, onSave, saving }: { config: any; onSave: (value
 }
 
 function AssetSettings({ config, onSave, saving }: { config: any; onSave: (value: any, description: string) => void; saving?: boolean }) {
+  const navigate = useNavigate();
   const [draft, setDraft] = useState(() => ({
     logoUrl: '',
     faviconUrl: '',
@@ -257,32 +221,46 @@ function AssetSettings({ config, onSave, saving }: { config: any; onSave: (value
   return (
     <section>
       <PanelHeader icon={<Images className="h-5 w-5" />} title="Assets" description="Central platform media library references for branding, favicon, dashboard previews, and animation assets." />
+      
+      {/* Link to the full Asset Manager */}
+      <div className="mb-6 rounded-lg border p-4" style={{ borderColor: 'rgb(var(--color-primary-200))', backgroundColor: 'rgb(var(--color-primary-50))' }}>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-medium" style={{ color: 'rgb(var(--color-primary-800))' }}>Asset Manager</p>
+            <p className="text-sm mt-1" style={{ color: 'rgb(var(--color-primary-600))' }}>Browse, upload, and manage all your media files in the full asset manager.</p>
+          </div>
+          <button onClick={() => navigate('/admin/assets')} className="btn-primary btn-sm">
+            <Images className="h-4 w-4" /> Open Asset Manager
+          </button>
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card p-5">
           <h4 className="mb-4 font-semibold" style={{ color: 'rgb(var(--color-text))' }}>Brand Assets</h4>
           <div className="space-y-4">
-            <MediaField label="Platform logo" value={draft.logoUrl} onChange={(value) => set('logoUrl', value)} />
-            <MediaField label="Favicon / icon" value={draft.faviconUrl} onChange={(value) => set('faviconUrl', value)} accept="image/*,.svg,.ico" />
-            <MediaField label="Icon sprite / icon set" value={draft.iconSpriteUrl} onChange={(value) => set('iconSpriteUrl', value)} accept="image/*,.svg,.ico" />
-            <MediaField label="Storefront preview image" value={draft.storefrontPreviewImageUrl} onChange={(value) => set('storefrontPreviewImageUrl', value)} />
+            <UniversalMediaField label="Platform logo" value={draft.logoUrl} onChange={(value) => set('logoUrl', value)} filter={{ category: 'branding' }} />
+            <UniversalMediaField label="Favicon / icon" value={draft.faviconUrl} onChange={(value) => set('faviconUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon,.jpg,.jpeg,.png,.webp,.gif,.ico" filter={{ category: 'branding' }} />
+            <UniversalMediaField label="Icon sprite / icon set" value={draft.iconSpriteUrl} onChange={(value) => set('iconSpriteUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon,.jpg,.jpeg,.png,.webp,.gif,.ico" />
+            <UniversalMediaField label="Storefront preview image" value={draft.storefrontPreviewImageUrl} onChange={(value) => set('storefrontPreviewImageUrl', value)} />
           </div>
         </div>
         <div className="card p-5">
           <h4 className="mb-4 font-semibold" style={{ color: 'rgb(var(--color-text))' }}>Interface Icons</h4>
           <div className="space-y-4">
-            <MediaField label="Navigation icon" value={draft.navigationIconUrl} onChange={(value) => set('navigationIconUrl', value)} accept="image/*,.svg,.ico" />
-            <MediaField label="Cart icon" value={draft.cartIconUrl} onChange={(value) => set('cartIconUrl', value)} accept="image/*,.svg,.ico" />
-            <MediaField label="User/account icon" value={draft.userIconUrl} onChange={(value) => set('userIconUrl', value)} accept="image/*,.svg,.ico" />
+            <UniversalMediaField label="Navigation icon" value={draft.navigationIconUrl} onChange={(value) => set('navigationIconUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon,.jpg,.jpeg,.png,.webp,.gif,.ico" />
+            <UniversalMediaField label="Cart icon" value={draft.cartIconUrl} onChange={(value) => set('cartIconUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon,.jpg,.jpeg,.png,.webp,.gif,.ico" />
+            <UniversalMediaField label="User/account icon" value={draft.userIconUrl} onChange={(value) => set('userIconUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/x-icon,image/vnd.microsoft.icon,.jpg,.jpeg,.png,.webp,.gif,.ico" />
           </div>
         </div>
         <div className="card p-5 lg:col-span-2">
           <h4 className="mb-4 font-semibold" style={{ color: 'rgb(var(--color-text))' }}>Dashboard & State Media</h4>
           <div className="grid gap-4 md:grid-cols-2">
-            <MediaField label="Admin dashboard image" value={draft.adminDashboardImageUrl} onChange={(value) => set('adminDashboardImageUrl', value)} />
-            <MediaField label="Seller dashboard image" value={draft.sellerDashboardImageUrl} onChange={(value) => set('sellerDashboardImageUrl', value)} />
-            <MediaField label="Dashboard animation" value={draft.dashboardAnimationUrl} onChange={(value) => set('dashboardAnimationUrl', value)} accept="image/*,.svg,.gif,.webp" />
-            <MediaField label="Loading animation" value={draft.loadingAnimationUrl} onChange={(value) => set('loadingAnimationUrl', value)} accept="image/*,.svg,.gif,.webp" />
-            <MediaField label="Empty state image" value={draft.emptyStateImageUrl} onChange={(value) => set('emptyStateImageUrl', value)} />
+            <UniversalMediaField label="Admin dashboard image" value={draft.adminDashboardImageUrl} onChange={(value) => set('adminDashboardImageUrl', value)} />
+            <UniversalMediaField label="Seller dashboard image" value={draft.sellerDashboardImageUrl} onChange={(value) => set('sellerDashboardImageUrl', value)} />
+            <UniversalMediaField label="Dashboard animation" value={draft.dashboardAnimationUrl} onChange={(value) => set('dashboardAnimationUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif" />
+            <UniversalMediaField label="Loading animation" value={draft.loadingAnimationUrl} onChange={(value) => set('loadingAnimationUrl', value)} accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif" />
+            <UniversalMediaField label="Empty state image" value={draft.emptyStateImageUrl} onChange={(value) => set('emptyStateImageUrl', value)} />
           </div>
         </div>
       </div>
@@ -306,7 +284,7 @@ function PromoBannersEditor({ banners, onChange }: { banners: any[]; onChange: (
             <Field label="Title" value={banner.title || ''} onChange={(value) => update(index, { title: value })} />
             <Field label="Link" value={banner.href || ''} onChange={(value) => update(index, { href: value })} placeholder="/products?search=..." />
             <div className="md:col-span-2"><Field label="Text" value={banner.text || ''} onChange={(value) => update(index, { text: value })} /></div>
-            <div className="md:col-span-2"><MediaField label="Banner image" value={banner.imageUrl || ''} onChange={(value) => update(index, { imageUrl: value })} /></div>
+            <div className="md:col-span-2"><UniversalMediaField label="Banner image" value={banner.imageUrl || ''} onChange={(value) => update(index, { imageUrl: value })} /></div>
           </div>
         </div>
       ))}
@@ -345,7 +323,7 @@ function HomeSettings({ config, onSave, saving }: { config: any; onSave: (value:
           <div className="grid gap-4 md:grid-cols-2">
             <Field label="Hero eyebrow" value={draft.heroEyebrow} onChange={(value) => set('heroEyebrow', value)} />
             <Field label="Hero title" value={draft.heroTitle} onChange={(value) => set('heroTitle', value)} />
-            <MediaField label="Hero image" value={draft.heroImageUrl} onChange={(value) => set('heroImageUrl', value)} />
+            <UniversalMediaField label="Hero image" value={draft.heroImageUrl} onChange={(value) => set('heroImageUrl', value)} />
             <div className="md:col-span-2"><Field label="Hero subtitle" value={draft.heroSubtitle} onChange={(value) => set('heroSubtitle', value)} type="textarea" /></div>
             <Field label="Search placeholder" value={draft.heroSearchPlaceholder} onChange={(value) => set('heroSearchPlaceholder', value)} />
           </div>
@@ -408,7 +386,7 @@ function CatalogSettings({ config, onSave, saving }: { config: any; onSave: (val
 function PaymentSettings({ config, onSave, saving }: { config: any; onSave: (value: any, description: string) => void; saving?: boolean }) {
   const [draft, setDraft] = useState(() => ({
     enabledMethods: config?.enabledMethods || ['CARD', 'MOBILE_MONEY', 'BANK_TRANSFER', 'CASH_ON_DELIVERY'],
-    providers: config?.providers || Object.values(paymentTemplates),
+    providers: config?.providers || [],
     requireConfiguredProvider: config?.requireConfiguredProvider ?? false,
     localMockEnabled: config?.localMockEnabled ?? true,
   }));
@@ -467,8 +445,11 @@ function PaymentSettings({ config, onSave, saving }: { config: any; onSave: (val
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div><h4 className="font-semibold" style={{ color: 'rgb(var(--color-text))' }}>Payment providers</h4><p className="text-sm" style={{ color: 'rgb(var(--color-text-muted))' }}>Configure Stripe, PayPal, M-Pesa, Flutterwave, or add a duplicate provider.</p></div>
         <div className="flex gap-2">
-          <select value={providerToAdd} onChange={(event) => setProviderToAdd(event.target.value)} className="select-field py-2">{Object.keys(paymentTemplates).map((id) => <option key={id} value={id}>{paymentTemplates[id].label}</option>)}</select>
-          <button onClick={() => setDraft({ ...draft, providers: [...draft.providers, { ...paymentTemplates[providerToAdd], id: `${providerToAdd}-${Date.now()}` }] })} className="btn-secondary"><Plus className="h-4 w-4" /> Add</button>
+          <select value={providerToAdd} onChange={(event) => setProviderToAdd(event.target.value)} className="select-field py-2">{paymentTemplateOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select>
+          <button onClick={() => {
+            const option = paymentTemplateOptions.find((item) => item.id === providerToAdd) || paymentTemplateOptions[0];
+            setDraft({ ...draft, providers: [...draft.providers, { id: `${providerToAdd}-${Date.now()}`, label: option.label, method: option.method, enabled: false, mode: 'test' }] });
+          }} className="btn-secondary"><Plus className="h-4 w-4" /> Add</button>
         </div>
       </div>
 
@@ -503,7 +484,7 @@ function PaymentSettings({ config, onSave, saving }: { config: any; onSave: (val
 
 function LoginSettings({ config, onSave, saving }: { config: any; onSave: (value: any, description: string) => void; saving?: boolean }) {
   const [draft, setDraft] = useState(() => ({
-    oauthProviders: config?.oauthProviders || Object.values(loginTemplates),
+    oauthProviders: config?.oauthProviders || [],
     localMockEnabled: config?.localMockEnabled ?? true,
     showOnLogin: config?.showOnLogin ?? true,
     showOnRegister: config?.showOnRegister ?? true,
@@ -514,7 +495,7 @@ function LoginSettings({ config, onSave, saving }: { config: any; onSave: (value
   const [providerToAdd, setProviderToAdd] = useState('google');
   const updateProvider = (index: number, patch: any) => setDraft({ ...draft, oauthProviders: draft.oauthProviders.map((item: any, i: number) => (i === index ? { ...item, ...patch } : item)) });
   const enabledProviders = draft.oauthProviders.filter((p: any) => p.enabled);
-  const getIcon = (id: string) => oauthIcons[id] || id[0].toUpperCase();
+  const getIcon = (id: string) => oauthIconFallbacks[id] || id[0].toUpperCase();
 
   return (
     <section>
@@ -556,11 +537,14 @@ function LoginSettings({ config, onSave, saving }: { config: any; onSave: (value
         <h4 className="font-semibold" style={{ color: 'rgb(var(--color-text))' }}>OAuth Providers</h4>
         <div className="flex gap-2">
           <select value={providerToAdd} onChange={(e) => setProviderToAdd(e.target.value)} className="select-field py-2 text-sm">
-            {Object.keys(loginTemplates).map((id) => (
-              <option key={id} value={id}>{loginTemplates[id].label}</option>
+            {loginProviderSuggestions.map((option) => (
+              <option key={option.id} value={option.id}>{option.label}</option>
             ))}
           </select>
-          <button onClick={() => setDraft({ ...draft, oauthProviders: [...draft.oauthProviders, { ...loginTemplates[providerToAdd], id: `${providerToAdd}-${Date.now()}` }] })} className="btn-secondary btn-sm">
+          <button onClick={() => {
+            const option = loginProviderSuggestions.find((item) => item.id === providerToAdd) || loginProviderSuggestions[0];
+            setDraft({ ...draft, oauthProviders: [...draft.oauthProviders, { id: `${providerToAdd}-${Date.now()}`, label: option.label, enabled: false, mode: 'test', brandColor: option.brandColor, brandIcon: option.brandIcon }] });
+          }} className="btn-secondary btn-sm">
             <Plus className="h-4 w-4" /> Add
           </button>
         </div>
@@ -568,10 +552,11 @@ function LoginSettings({ config, onSave, saving }: { config: any; onSave: (value
 
       <div className="grid gap-4 xl:grid-cols-2">
         {draft.oauthProviders.map((provider: any, index: number) => {
-          const isNew = !Object.keys(loginTemplates).includes(provider.id.replace(/-\d+$/, ''));
           const templateId = provider.id.replace(/-\d+$/, '');
-          const icon = getIcon(templateId);
-          const color = provider.brandColor || loginTemplates[templateId]?.brandColor || '#666';
+          const isNew = !loginProviderSuggestions.some((item) => item.id === templateId);
+          const providerTemplate = loginProviderSuggestions.find((item) => item.id === templateId);
+          const icon = provider.brandIcon || providerTemplate?.brandIcon || getIcon(templateId);
+          const color = provider.brandColor || providerTemplate?.brandColor || '#666';
           return (
             <div key={provider.id} className="card p-5 overflow-hidden">
               <div className="mb-4 flex items-center justify-between gap-3">
@@ -632,7 +617,7 @@ function LoginSettings({ config, onSave, saving }: { config: any; onSave: (value
 }
 
 function UploadSettings({ config, onSave, saving }: { config: any; onSave: (value: any, description: string) => void; saving?: boolean }) {
-  const [draft, setDraft] = useState(() => ({ maxProductImages: 8, maxImageSizeMb: 5, acceptedImageTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'], ...config }));
+  const [draft, setDraft] = useState(() => ({ maxProductImages: 8, maxImageSizeMb: 5, acceptedImageTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/x-icon', 'image/vnd.microsoft.icon'], ...config }));
   return (
     <section>
       <PanelHeader icon={<Upload className="h-5 w-5" />} title="Upload Settings" description="Control media limits and accepted image formats for sellers." />
@@ -708,7 +693,15 @@ function PagesSettings({ config, onSave, saving }: { config: any[]; onSave: (val
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="Title" value={page.title} onChange={(value) => update(index, { title: value })} />
               <Field label="Slug" value={page.slug} onChange={(value) => update(index, { slug: value })} />
-              <div className="md:col-span-2"><Field label="Page body" type="textarea" value={page.body} onChange={(value) => update(index, { body: value })} /></div>
+              <div className="md:col-span-2">
+                <label className="mb-1 block text-sm font-medium" style={{ color: 'rgb(var(--color-text-secondary))' }}>Page body</label>
+                <RichTextEditor
+                  value={page.body || ''}
+                  onChange={(html) => update(index, { body: html })}
+                  placeholder="Write page content here..."
+                  minHeight={250}
+                />
+              </div>
             </div>
           </div>
         ))}
@@ -839,12 +832,13 @@ export default function AdminConfig() {
       { id: 'login', label: 'Login', icon: LogIn },
     ] },
     { group: 'Operations', items: [
+      { id: 'currency', label: 'Currency', icon: CreditCard },
       { id: 'deployment', label: 'Deployment', icon: Rocket },
       { id: 'custom', label: 'Custom Settings', icon: Settings },
     ] },
   ];
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
 
   return (
     <div className="space-y-6">

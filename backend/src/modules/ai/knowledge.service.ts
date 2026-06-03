@@ -1,7 +1,7 @@
 import { prisma } from '../../common/prisma';
 import { AppError, NotFoundError } from '../../common/errors';
 import { logger } from '../../common/logger';
-import { AiToolRegistry } from './ai-tool-registry.service';
+import { AiService } from './ai.service';
 
 /**
  * KnowledgeService
@@ -20,11 +20,13 @@ export class KnowledgeService {
   private embeddingProvider: string;
   private embeddingModel: string;
   private dimension: number;
+  private aiService: AiService;
 
   constructor() {
     this.embeddingProvider = process.env.EMBEDDING_PROVIDER || 'openai';
     this.embeddingModel = process.env.EMBEDDING_MODEL || 'text-embedding-3-small';
     this.dimension = 1536; // Default for OpenAI text-embedding-3-small
+    this.aiService = new AiService();
   }
 
   /**
@@ -43,16 +45,16 @@ export class KnowledgeService {
     let embedding: number[] | null = null;
     const provider = data.embeddingProvider || this.embeddingProvider;
 
-    if (provider === 'openai' && process.env.OPENAI_API_KEY) {
+    if (provider === 'local') {
+      // Use simple hash-based embedding for local models
+      embedding = this.generateLocalEmbedding(data.content);
+    } else {
       try {
         const result = await this.generateEmbedding(data.content, provider);
         embedding = result.embedding;
       } catch (error: any) {
         logger.warn('Embedding generation failed, storing without embedding', { error: error.message });
       }
-    } else if (provider === 'local') {
-      // Use simple hash-based embedding for local models
-      embedding = this.generateLocalEmbedding(data.content);
     }
 
     const entry = await prisma.aiKnowledgeSource.create({
@@ -311,6 +313,27 @@ export class KnowledgeService {
    * Generate embedding using configured provider.
    */
   async generateEmbedding(text: string, provider: string = 'openai'): Promise<EmbeddingResult> {
+    if (provider === 'local') {
+      return { embedding: this.generateLocalEmbedding(text), model: 'local-hash', tokens: 0 };
+    }
+
+    try {
+      const providerResult = await this.aiService.createEmbeddings(provider, this.embeddingModel, text);
+      const embedding = providerResult?.data?.[0]?.embedding;
+      if (!Array.isArray(embedding)) throw new AppError(500, 'Invalid embedding response');
+      return {
+        embedding,
+        model: providerResult.model || this.embeddingModel,
+        tokens: providerResult.usage?.total_tokens || 0,
+      };
+    } catch (error: any) {
+      if (!(provider === 'openai' && process.env.OPENAI_API_KEY)) throw error;
+      logger.warn('Configured AI embedding provider unavailable; falling back to OPENAI_API_KEY', {
+        provider,
+        error: error.message,
+      });
+    }
+
     if (provider === 'openai') {
       const apiKey = process.env.OPENAI_API_KEY;
       if (!apiKey) throw new AppError(500, 'OpenAI API key not configured for embeddings');
@@ -384,8 +407,11 @@ export class KnowledgeService {
     if (options?.category) where.category = options.category;
 
     const entries = await prisma.aiKnowledgeSource.findMany({ where });
+    const allowedEntries = options?.role
+      ? entries.filter((entry) => this.entryAllowsRole(entry, options.role!))
+      : entries;
 
-    const results = entries
+    const results = allowedEntries
       .map(entry => ({
         ...this.sanitize(entry),
         score: this.cosineSimilarity(
@@ -397,6 +423,16 @@ export class KnowledgeService {
       .sort((a, b) => b.score - a.score);
 
     return results.slice(0, options?.limit || 10);
+  }
+
+  private entryAllowsRole(entry: { roles?: string | null }, role: string): boolean {
+    if (!entry.roles) return true;
+    try {
+      const roles = JSON.parse(entry.roles);
+      return Array.isArray(roles) && roles.includes(role);
+    } catch {
+      return false;
+    }
   }
 
   /**

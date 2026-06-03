@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { MessageSquareReply, Star } from 'lucide-react';
 import { useReplyToReview, useSellerReviews } from '../../lib/query-hooks';
 import { assetUrl } from '../../lib/assets';
-import LoadingScreen from '../shared/LoadingScreen';
+import { SkeletonPage } from '../../components/Skeleton';
 import EmptyState from '../shared/EmptyState';
 
 export default function SellerReviews() {
@@ -13,7 +14,7 @@ export default function SellerReviews() {
   const reviews = data?.data || [];
   const pagination = data?.pagination;
 
-  if (isLoading) return <LoadingScreen />;
+  if (isLoading) return <SkeletonPage cards={6} columns={3} />;
 
   return (
     <div>
@@ -40,11 +41,26 @@ export default function SellerReviews() {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-gray-900">{review.product?.title}</p>
-                      <p className="text-sm text-gray-500">
-                        {review.user?.firstName || 'Customer'} {review.user?.lastName || ''} · {new Date(review.createdAt).toLocaleDateString()}
-                      </p>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to={`/user/${review.user?.id}`}
+                        className="w-7 h-7 rounded-full overflow-hidden shrink-0 flex items-center justify-center text-xs font-bold bg-primary-100 text-primary-700 hover:ring-2 hover:ring-primary-300 transition-all"
+                      >
+                        {review.user?.avatar ? (
+                          <img src={assetUrl(review.user.avatar)} alt={review.user.firstName || 'Customer'} className="w-full h-full object-cover" />
+                        ) : (
+                          (review.user?.firstName?.[0] || 'C') + (review.user?.lastName?.[0] || '')
+                        )}
+                      </Link>
+                      <div>
+                        <p className="font-medium text-gray-900">{review.product?.title}</p>
+                        <p className="text-sm text-gray-500">
+                          <Link to={`/user/${review.user?.id}`} className="hover:underline">
+                            {review.user?.firstName || 'Customer'} {review.user?.lastName || ''}
+                          </Link>
+                          {' · '}{new Date(review.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
                     <div className="flex items-center gap-1 text-yellow-500">
                       {Array.from({ length: 5 }).map((_, index) => (
