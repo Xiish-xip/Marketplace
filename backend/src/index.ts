@@ -78,6 +78,9 @@ import supplierPortalRoutes from './modules/supplier-portal/supplier-portal.rout
 
 const app = express();
 
+// Trust proxy for rate limiting behind Railway's load balancer
+app.set('trust proxy', 1);
+
 function escapeSvgText(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ({
     '&': '&amp;',
