@@ -19,6 +19,7 @@ export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  frontendUrls: process.env.FRONTEND_URLS ? process.env.FRONTEND_URLS.split(',').map(u => u.trim()) : [],
   backendUrl: process.env.BACKEND_URL || `http://localhost:${process.env.PORT || '3000'}`,
 
   // Database

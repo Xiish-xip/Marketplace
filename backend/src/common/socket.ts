@@ -65,18 +65,19 @@ export function getIO(): Server | null {
 }
 
 export function initSocketServer(httpServer: HttpServer): Server {
-  const isDev = config.nodeEnv !== 'production';
-  io = new Server(httpServer, {
-    cors: {
-      origin: isDev
-        ? [/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/, /^https?:\/\/192\.168\.\d+\.\d+:\d+$/]
-        : [config.frontendUrl],
-      credentials: true,
-      methods: ['GET', 'POST'],
-    },
-    pingTimeout: 60000,
-    pingInterval: 25000,
-  });
+   const isDev = config.nodeEnv !== 'production';
+   const socketOrigins = isDev
+     ? [/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/, /^https?:\/\/192\.168\.\d+\.\d+:\d+$/]
+     : [...config.frontendUrls, config.frontendUrl].filter(Boolean);
+   io = new Server(httpServer, {
+     cors: {
+       origin: socketOrigins,
+       credentials: true,
+       methods: ['GET', 'POST'],
+     },
+     pingTimeout: 60000,
+     pingInterval: 25000,
+   });
 
   // Authentication middleware
   io.use((socket: AuthenticatedSocket, next) => {

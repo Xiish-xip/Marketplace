@@ -118,7 +118,7 @@ app.use((_req, res, next) => {
   next();
 });
 const allowedOrigins = config.nodeEnv === 'production'
-  ? [config.frontendUrl]
+  ? [...config.frontendUrls, config.frontendUrl].filter(Boolean)
   : [/^https?:\/\/(localhost|127\.0\.0\.1):\d+$/, /^https?:\/\/192\.168\.\d+\.\d+:\d+$/];
 
 app.use(cors({

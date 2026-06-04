@@ -120,7 +120,7 @@ function parseCookieHeader(cookieHeader = ''): Record<string, string> {
 function csrfCookieOptions() {
   return {
     httpOnly: true,
-    sameSite: 'lax' as const,
+    sameSite: config.nodeEnv === 'production' ? ('none' as const) : ('lax' as const),
     secure: config.nodeEnv === 'production',
     path: '/',
     maxAge: 24 * 60 * 60 * 1000,
